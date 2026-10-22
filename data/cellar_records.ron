@@ -1,0 +1,37 @@
+[
+    (
+        name: "Adda Wren",
+        years: "Day 1 - Day 340",
+        epitaph: "Kept the ledgers straight. Buried holy, mostly. The Village remembers her kindly enough.",
+        sacrificed_to: "unknown",
+        village: "unknown",
+    ),
+    (
+        name: "Osric Vane",
+        years: "Day 341 - Day 512",
+        epitaph: "Favored the old ways - dirt and iron, more often than not. The Cult still speaks his name at the fire.",
+        sacrificed_to: "unknown",
+        village: "unknown",
+    ),
+    (
+        name: "Mirel Ashgrove",
+        years: "Day 513 - Day 809",
+        epitaph: "Balanced both sides as long as she could. Neither faction claims her, and neither forgets her.",
+        sacrificed_to: "unknown",
+        village: "unknown",
+    ),
+    (
+        name: "Tobin Colwick",
+        years: "Day 810 - Day 1024",
+        epitaph: "Short tenure. No record of why it ended. The ground took him same as anyone.",
+        sacrificed_to: "unknown",
+        village: "unknown",
+    ),
+    (
+        name: "Hollis Deighan",
+        years: "Day 1025 - Day 1310",
+        epitaph: "Came before the current keeper. Nothing else is written here yet.",
+        sacrificed_to: "unknown",
+        village: "unknown",
+    ),
+]

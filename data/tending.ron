@@ -1,0 +1,83 @@
+// data/tending.ron
+
+[
+    (
+        zone_id: "mournhollow_grounds",
+        faction_id: "village",
+        amount: 2,
+        restock_item: "mourning_wreath",
+        restock_amount: 1,
+        flavor_text: "You help clear the frost from Mournhollow's grave markers. Someone thanks you without quite meeting your eyes.",
+    ),
+    (
+        zone_id: "ashmourn_grounds",
+        faction_id: "cult",
+        amount: 2,
+        restock_item: "widows_ash",
+        restock_amount: 1,
+        flavor_text: "You feed Ashmourn's pyre through the night. No one thanks you. No one needs to.",
+    ),
+    (
+        zone_id: "heartwarden_grounds",
+        faction_id: "village",
+        amount: 2,
+        restock_item: "loveknot",
+        restock_amount: 1,
+        flavor_text: "You mend a fence at Heartwarden alongside a stranger who talks the whole time about someone they lost.",
+    ),
+    (
+        zone_id: "heartforge_grounds",
+        faction_id: "cult",
+        amount: 2,
+        restock_item: "forgechain",
+        restock_amount: 1,
+        flavor_text: "You work the bellows at Heartforge. The heat says more than the silence would.",
+    ),
+    (
+        zone_id: "penncross_grounds",
+        faction_id: "village",
+        amount: 2,
+        restock_item: "penitent_stone",
+        restock_amount: 1,
+        flavor_text: "You sit with Penncross's record-keeper while she copies old confessions into a new book.",
+    ),
+    (
+        zone_id: "guiltpyre_grounds",
+        faction_id: "cult",
+        amount: 2,
+        restock_item: "pyre_coal",
+        restock_amount: 1,
+        flavor_text: "You help burn a season's worth of ledgers at Guiltpyre. The ash settles like it always does.",
+    ),
+    (
+        zone_id: "hopewell_grounds",
+        faction_id: "village",
+        amount: 2,
+        restock_item: "hopewell_bloom",
+        restock_amount: 1,
+        flavor_text: "You draw water at Hopewell for a garden that won't bloom until well after you've likely moved on.",
+    ),
+    (
+        zone_id: "hopeforsworn_grounds",
+        faction_id: "cult",
+        amount: 2,
+        restock_item: "forsworn_husk",
+        restock_amount: 1,
+        flavor_text: "You walk Hopeforsworn's boundary with someone who stopped believing in directions a long time ago.",
+    ),
+    (
+        zone_id: "morgue",
+        stipend_amount: Some(3.0),
+        flavor_text: "You clean the slabs and restock the salt bins. Tedious, but necessary work.",
+    ),
+    (
+        zone_id: "workyard",
+        stipend_amount: Some(3.0),
+        flavor_text: "You sharpen tools and stack the fresh timber. The work asks nothing of you, but your hands certainly do.",
+    ),
+    (
+        zone_id: "cellar",
+        stipend_amount: Some(3.0),
+        flavor_text: "You dust the old markers and straighten what's crooked. Small mercies.",
+    ),
+]

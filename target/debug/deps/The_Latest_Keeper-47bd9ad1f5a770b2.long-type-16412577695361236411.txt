@@ -1,0 +1,1 @@
+for<'a, 'b, 'c, 'd, 'e> fn(&'a [TutorialStep], &'b mut HashSet<std::string::String>, &'c str, &'d mut Vec<std::string::String>, &'e mut std::option::Option<(std::string::String, f32)>) {fire_tutorial}

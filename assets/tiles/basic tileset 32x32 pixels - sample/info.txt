@@ -1,0 +1,5 @@
+This is a sample for a Basic grass-themed 32x32 tileset in this series that is available as a separate asset pack on itch.io.
+Most of the tiles and assets in this pack are free.
+
+You can find the full Version here:
+https://schwarnhild.itch.io/basic-tileset-and-asset-pack-32x32-pixels

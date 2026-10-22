@@ -1,0 +1,12 @@
+[package]
+name = "The_Latest_Keeper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+macroquad = "0.4"
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"
+
+[profile.release]
+opt-level = 3

@@ -1,0 +1,42 @@
+[
+    (
+        id: "tut_welcome",
+        trigger: "game_start",
+        text: "WASD to move, E to pick up reagents in front of you. The dead don't wait - the Village and the Cult are both watching, and neither agrees on what's right.",
+    ),
+    (
+        id: "tut_pickup",
+        trigger: "first_pickup",
+        text: "Reagents shape the rite. Open your inventory with I, or click a slot in the bar below, to pick up to 4 for the next rite.",
+    ),
+    (
+        id: "tut_burial",
+        trigger: "first_burial",
+        text: "Every disposal shifts reputation - burial leans Village, burning leans Cult. There's no rite that pleases everyone.",
+    ),
+    (
+        id: "tut_cellar",
+        trigger: "first_cellar_visit",
+        text: "The Cellar remembers every keeper before you. Someday, it will remember you too.",
+    ),
+    (
+        id: "tut_reagent_toggle",
+        trigger: "first_reagent_toggle",
+        text: "Selected reagents are spent when you perform the rite. Press SPACE at a dug grave or lit fire to use them.",
+    ),
+    (
+        id: "tut_reputation_conflict",
+        trigger: "first_reputation_conflict",
+        text: "That rite pleased one side and angered the other. Holy and profane pull in opposite directions.",
+    ),
+    (
+        id: "tut_village_travel",
+        trigger: "first_village_travel",
+        text: "Villages have their own people and reagents. Press T to tend the place once a day, and E to talk.",
+    ),
+    (
+        id: "tut_disposal_choice",
+        trigger: "first_disposal_choice",
+        text: "Dig a grave with the Shovel [2] + F, or light the incinerator with F. Burying and burning mean different things to each side.",
+    ),
+]

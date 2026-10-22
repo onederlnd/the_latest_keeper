@@ -1,0 +1,125 @@
+// items.ron
+// Reagent definitions. `tags` are unioned onto a Rite when a reagent is
+// selected; reputation-linked tags (holy/profane/preserved/bound) get
+// weighted by count-of-selected-reagents-carrying-them in rite.rs, theme
+// tags (grief/love/guilt/hope) carry no reputation weight and exist only
+// for the `reconciled` rite flag + future story/epitaph hooks.
+//
+// `source_zone` is the id of the Zone this reagent is stocked in
+// (must match an id in zones.ron). `daily_stock` is the amount restocked
+// per in-game day; village reagents are additionally topped up by Tending
+// (see tending.ron), up to a cap — see tending_stock_cap below.
+//
+// NOTE: field names/types here are my best guess at what ItemDef in
+// items.rs/rite.rs expects, based on the README's description
+// ("reagent definitions: id, name, tags"). Adjust field names below to
+// match the actual struct if it differs (e.g. if tags is a bitflag enum
+// rather than a Vec<String>).
+
+[
+    // Base reagents (Morgue / Workyard)
+    (
+        id: "salt",
+        name: "Salt",
+        tags: ["preserved"],
+        source_zone: "morgue",
+        daily_stock: 5,
+        tending_stock_cap: None,
+    ),
+    (
+        id: "candle",
+        name: "Prayer Candle",
+        tags: ["holy", "preserved"],
+        source_zone: "morgue",
+        daily_stock: 4,
+        tending_stock_cap: None,
+    ),
+    (
+        id: "grave_dirt",
+        name: "Grave Dirt",
+        tags: ["profane", "bound"],
+        source_zone: "workyard",
+        daily_stock: 5,
+        tending_stock_cap: None,
+    ),
+    (
+        id: "iron_nail",
+        name: "Iron Nail",
+        tags: ["bound"],
+        source_zone: "workyard",
+        daily_stock: 4,
+        tending_stock_cap: None,
+    ),
+
+    // Village reagents: Grief pair
+    (
+        id: "mourning_wreath",
+        name: "Mourning Bell Flower",
+        tags: ["holy", "grief"],
+        source_zone: "mournhollow",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+    (
+        id: "widows_ash",
+        name: "Ember-Ash Bloom",
+        tags: ["profane", "grief"],
+        source_zone: "ashmourn",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+
+    // Village reagents: Love pair
+    (
+        id: "loveknot",
+        name: "Widow's Ring",
+        tags: ["holy", "love", "bound"],
+        source_zone: "heartwarden",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+    (
+        id: "forgechain",
+        name: "Forge-Scarred Locket",
+        tags: ["profane", "love", "bound"],
+        source_zone: "heartforge",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+
+    // Village reagents: Guilt pair
+    (
+        id: "penitent_stone",
+        name: "Confessor's Stone",
+        tags: ["holy", "guilt"],
+        source_zone: "penncross",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+    (
+        id: "pyre_coal",
+        name: "Blackened Ledger Page",
+        tags: ["profane", "guilt"],
+        source_zone: "guiltpyre",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+
+    // Village reagents: Hope pair
+    (
+        id: "hopewell_bloom",
+        name: "Dawnseed",
+        tags: ["holy", "hope", "preserved"],
+        source_zone: "hopewell",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+    (
+        id: "forsworn_husk",
+        name: "Broken Compass",
+        tags: ["profane", "hope", "bound"],
+        source_zone: "hopeforsworn",
+        daily_stock: 1,
+        tending_stock_cap: Some(2),
+    ),
+]

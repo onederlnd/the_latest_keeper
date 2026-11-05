@@ -65,6 +65,8 @@ pub struct SaveData {
     pub corpse: Option<Corpse>,
     #[serde(default)]
     pub burn_timer: Option<f32>,
+    #[serde(default)]
+    pub bound_this_life: u32,
 }
 
 pub fn save_game(data: &SaveData, path: &str) -> Result<(), String> {

@@ -7,6 +7,7 @@ edition = "2021"
 macroquad = "0.4"
 serde = { version = "1", features = ["derive"] }
 ron = "0.8"
+include_dir = "0.7"
 
 [profile.release]
 opt-level = 3

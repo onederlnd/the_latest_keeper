@@ -1,5 +1,7 @@
 // src/main.rs
 
+#![windows_subsystem = "windows"]
+
 mod action;
 mod cellar;
 mod clock;
@@ -18,10 +20,13 @@ mod save;
 mod story;
 mod tending;
 mod tutorial;
+mod ui;
+mod village_layout;
 mod world;
 mod zone;
 
 use crate::npc::Npc;
+use crate::rite::Disposal as RiteDisposal;
 use crate::zone::ZoneRegistry;
 
 use action::{ActionKind, ActionStatus, TimedAction};
@@ -31,6 +36,7 @@ use corpse::{Corpse, CorpseState, Disposal};
 use discovery::Discovery;
 use economy::Economy;
 use faction::FactionDef;
+use include_dir::{include_dir, Dir};
 use macroquad::prelude::*;
 use macroquad::rand;
 use milestone::Milestone;
@@ -38,17 +44,19 @@ use progression::Tier;
 use quest::{QuestDef, QuestKind, QuestStatus};
 use render::{AssetStore, GameCamera};
 use render_helpers::{
-    draw_grave_markers, draw_progress_bar, draw_temple, point_in_rect, wrap_text,
+    draw_building, draw_grave_markers, draw_progress_bar, draw_roof, draw_temple, point_in_rect,
+    wall_rects, wrap_text,
 };
 use rite::{resolve_rite, Reagent};
 use save::{load_game, save_game, SaveData};
-use std::collections::hash_map;
 use std::collections::HashMap;
 use story::StoryBeat;
 use tending::TendTask;
 use tutorial::TutorialStep;
-use world::{generate_tilemap, generate_village, MapId, VillageInstance, VILLAGE_STOCK};
-use zone::Zone;
+use ui::{theme, Ui};
+use village_layout::VillagePropKind;
+use world::{generate_tilemap, generate_village, seed_for, MapId, VillageInstance, VILLAGE_STOCK};
+use zone::{Zone, ZoneKind};
 
 enum MenuChoice {
     NewGame,
@@ -79,17 +87,35 @@ struct UseableSlot {
     hint: &'static str,
 }
 
+struct Particle {
+    pos: Vec2,
+    vel: Vec2,
+    age: f32,
+    life: f32,
+    smoke: bool,
+}
+
+struct Floater {
+    text: String,
+    pos: Vec2,
+    age: f32,
+    color: Color,
+}
+
+static DATA: Dir = include_dir!("$CARGO_MANIFEST_DIR/data");
+static ASSETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets");
+
 const AUTOPSY_SECS: f32 = 15.0;
 const DIG_SECS: f32 = 20.0;
 const STOKE_SECS: f32 = 20.0;
 const INTERACT_REACH: f32 = 40.0;
-const DISPOSAL_WEIGHT: f32 = 0.5;
 const THEMES: [(&str, &str, &str); 4] = [
     ("grief", "mournhollow", "ashmourn"),
     ("love", "heartwarden", "heartforge"),
     ("guilt", "penncross", "guiltpyre"),
     ("hope", "hopewell", "hopeforsworn"),
 ];
+
 const USEABLES: [UseableSlot; 4] = [
     UseableSlot {
         label: "Hoe",
@@ -108,33 +134,36 @@ const USEABLES: [UseableSlot; 4] = [
         hint: "4",
     },
 ];
-fn menu_button(rect: (f32, f32, f32, f32), label: &str, enabled: bool) -> bool {
-    let hover = enabled && point_in_rect(mouse_position(), rect);
-    let bg = if !enabled {
-        Color::new(0.1, 0.1, 0.1, 0.6)
-    } else if hover {
-        Color::new(0.2, 0.5, 0.2, 0.85)
+
+const BASE_CARRY_SLOTS: u32 = 5;
+const BOUND_PER_SLOT: u32 = 12; // bound weight needed per extra slot (to be tuned)
+const MAX_BONUS_SLOTS: u32 = 3; // cap: max 8 slots
+
+const FADE_OUT_SECS: f32 = 0.8;
+const FADE_HOLD_SECS: f32 = 0.7;
+const FADE_IN_SECS: f32 = 1.2;
+const FADE_TOTAL_SECS: f32 = FADE_OUT_SECS + FADE_HOLD_SECS + FADE_IN_SECS;
+const TRAVEL_FADE_SECS: f32 = 0.75;
+
+fn data(name: &str) -> &'static str {
+    DATA.get_file(name)
+        .unwrap_or_else(|| panic!("missing data file {name}"))
+        .contents_utf8()
+        .unwrap()
+}
+
+fn carry_slots(bound_this_life: u32) -> u32 {
+    BASE_CARRY_SLOTS + (bound_this_life / BOUND_PER_SLOT).min(MAX_BONUS_SLOTS)
+}
+
+fn fade_alpha(t: f32) -> f32 {
+    if t < FADE_OUT_SECS {
+        t / FADE_OUT_SECS
+    } else if t < FADE_OUT_SECS + FADE_HOLD_SECS {
+        1.0
     } else {
-        Color::new(0.15, 0.15, 0.15, 0.68)
-    };
-    draw_rectangle(rect.0, rect.1, rect.2, rect.3, bg);
-    draw_rectangle_lines(
-        rect.0,
-        rect.1,
-        rect.2,
-        rect.3,
-        2.0,
-        if enabled { WHITE } else { GRAY },
-    );
-    let d = measure_text(label, None, 24, 1.0);
-    draw_text(
-        label,
-        rect.0 + (rect.2 - d.width) / 2.0,
-        rect.1 + rect.3 / 2.0 + d.height / 2.0,
-        24.0,
-        if enabled { WHITE } else { GRAY },
-    );
-    hover && is_mouse_button_pressed(MouseButton::Left)
+        (1.0 - (t - FADE_OUT_SECS - FADE_HOLD_SECS) / FADE_IN_SECS).max(0.0)
+    }
 }
 
 fn target_zone(themes: &[String], pair: u32, cult: bool) -> Option<&'static str> {
@@ -144,6 +173,7 @@ fn target_zone(themes: &[String], pair: u32, cult: bool) -> Option<&'static str>
         .find(|t| t.0 == theme.as_str())
         .map(|t| if cult { t.2 } else { t.1 })
 }
+
 fn quest_marker(
     npc_id: &str,
     quest_defs: &[QuestDef],
@@ -235,6 +265,7 @@ fn next_quest_in_days(
         })
         .min()
 }
+
 fn locked_village_hint(zone_id: &str) -> &'static str {
     match zone_id {
         "mournhollow" => "Something quiet waits past the mist out of the north.",
@@ -260,11 +291,363 @@ fn weekday_label(w: clock::Weekday) -> &'static str {
     }
 }
 
+fn faction_color(id: &str) -> Color {
+    match id {
+        "village" => theme::VILLAGE,
+        "cult" => theme::CULT,
+        _ => WHITE,
+    }
+}
+
+fn float(f: &mut Vec<Floater>, text: String, at: Vec2, color: Color, row: usize) {
+    f.push(Floater {
+        text,
+        pos: vec2(at.x, at.y - 20.0 - row as f32 * 18.0),
+        age: 0.0,
+        color,
+    });
+}
+fn blocked(p: Vec2, solids: &[(f32, f32, f32, f32)]) -> bool {
+    let hb = (p.x - 8.0, p.y + 2.0, 16.0, 12.0); // feet hitbox
+    solids.iter().any(|s| rects_overlap(hb, *s))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum PropKind {
+    Tuft,
+    Grave,
+    Tree,
+    Bush,
+    Rock,
+    Barrel,
+    Crate,
+    Well,
+    Lamp,
+    Bench,
+}
+
+#[derive(Clone)]
+struct Prop {
+    pos: (f32, f32),
+    kind: PropKind,
+    var: f32,
+}
+
+enum Who {
+    Player,
+    Npc(usize),
+    Prop(usize),
+}
+
+fn gen_props(def: &render::TileMapDef, zones: &ZoneRegistry, seed: u64) -> Vec<Prop> {
+    let rng = rand::RandGenerator::new();
+    rng.srand(seed);
+    let w = def.rows[0].chars().count() as f32 * def.tile_size;
+    let h = def.rows.len() as f32 * def.tile_size;
+    let tile = |x: f32, y: f32| {
+        let col = ((x - def.origin.0) / def.tile_size) as usize;
+        let row = ((y - def.origin.1) / def.tile_size) as usize;
+        def.rows.get(row).and_then(|r| r.chars().nth(col))
+    };
+    let mut props: Vec<Prop> = Vec::new();
+    for (kind, count) in [
+        (PropKind::Tree, 30),
+        (PropKind::Grave, 20),
+        (PropKind::Tuft, 120),
+    ] {
+        let mut placed = 0;
+        for _ in 0..count * 20 {
+            if placed >= count {
+                break;
+            }
+            let x = def.origin.0 + rng.gen_range(32.0, w - 32.0);
+            let y = def.origin.1 + rng.gen_range(32.0, h - 32.0);
+
+            let reach = if kind == PropKind::Tuft { 0.0 } else { 32.0 };
+            let near_path = [
+                (0.0, 0.0),
+                (-reach, 0.0),
+                (reach, 0.0),
+                (0.0, -reach),
+                (0.0, reach),
+            ]
+            .iter()
+            .any(|(dx, dy)| tile(x + dx, y + dy) == Some('P'));
+            if near_path {
+                continue;
+            }
+            if kind != PropKind::Tuft {
+                let near_spawn = (x * x + y * y).sqrt() < 100.0
+                    || (x * x + (y - 150.0) * (y - 150.0)).sqrt() < 60.0;
+                let in_zone = zones
+                    .zones
+                    .values()
+                    .any(|z| z.overlaps(x - 16.0, y - 16.0, 32.0, 32.0, 24.0));
+                let crowded = props.iter().any(|p| {
+                    p.kind != PropKind::Tuft
+                        && (p.pos.0 - x).abs() < 40.0
+                        && (p.pos.1 - y).abs() < 40.0
+                });
+                if near_spawn || in_zone || crowded {
+                    continue;
+                }
+            }
+            props.push(Prop {
+                pos: (x, y),
+                kind,
+                var: rng.gen_range(0.0, 1.0),
+            });
+            placed += 1;
+        }
+    }
+    props
+}
+
+fn village_props(inst: &VillageInstance, zones: &ZoneRegistry) -> Vec<Prop> {
+    let rng = rand::RandGenerator::new();
+    rng.srand(inst.seed ^ 0x5EED);
+    let mut props: Vec<Prop> = gen_props(&inst.tilemap, zones, inst.seed)
+        .into_iter()
+        .filter(|p| p.kind == PropKind::Tuft)
+        .collect();
+    for vp in &inst.props {
+        let kind = match vp.kind {
+            VillagePropKind::Tree => PropKind::Tree,
+            VillagePropKind::Bush => PropKind::Bush,
+            VillagePropKind::Rock => PropKind::Rock,
+            VillagePropKind::Barrel => PropKind::Barrel,
+            VillagePropKind::Crate => PropKind::Crate,
+            VillagePropKind::Well => PropKind::Well,
+            VillagePropKind::Lamp => PropKind::Lamp,
+            VillagePropKind::Bench => PropKind::Bench,
+        };
+        props.push(Prop {
+            pos: vp.pos,
+            kind,
+            var: rng.gen_range(0.0, 1.0),
+        });
+    }
+    props
+}
+
+fn entrance_trees(def: &render::TileMapDef, zones: &ZoneRegistry, props: &mut Vec<Prop>) {
+    let rng = rand::RandGenerator::new();
+    rng.srand(7);
+    let blocked_tile = |x: f32, y: f32| {
+        let col = ((x - def.origin.0) / def.tile_size).floor();
+        let row = ((y - def.origin.1) / def.tile_size).floor();
+        if col < 0.0 || row < 0.0 {
+            return true;
+        }
+        def.rows
+            .get(row as usize)
+            .and_then(|r| r.chars().nth(col as usize))
+            != Some('G')
+    };
+    for z in zones.zones.values().filter(|z| z.faction_id.is_some()) {
+        let (cx, cy) = (z.position.0 + z.size.0 / 2.0, z.position.1 + z.size.1 / 2.0);
+        let mut placed = 0;
+        for _ in 0..200 {
+            if placed >= 12 {
+                break;
+            }
+            let a = rng.gen_range(0.0f32, std::f32::consts::TAU);
+            let r = rng.gen_range(110.0f32, 190.0);
+            let (x, y) = (cx + r * a.cos(), cy + r * a.sin());
+            let clear = [(0.0, 0.0), (-20.0, 0.0), (0.0, -20.0), (0.0, 20.0)]
+                .iter()
+                .all(|(dx, dy)| !blocked_tile(x + dx, y + dy));
+            let in_zone = zones
+                .zones
+                .values()
+                .any(|o| o.overlaps(x - 16.0, y - 16.0, 32.0, 32.0, 16.0));
+            let crowded = props.iter().any(|p| {
+                p.kind != PropKind::Tuft && (p.pos.0 - x).abs() < 36.0 && (p.pos.1 - y).abs() < 36.0
+            });
+            if clear && !in_zone && !crowded {
+                props.push(Prop {
+                    pos: (x, y),
+                    kind: PropKind::Tree,
+                    var: rng.gen_range(0.0, 1.0),
+                });
+                placed += 1;
+            }
+        }
+    }
+}
+
+fn draw_memorial(z: &Zone, t: f32) {
+    let (x, y) = z.position;
+    let (w, h) = z.size;
+    let cx = x + w / 2.0;
+    let stone = Color::new(0.55, 0.55, 0.6, 1.0);
+    let dark = Color::new(0.38, 0.38, 0.43, 1.0);
+
+    // worn ring of flagstones
+    draw_circle(cx, y + h * 0.6, w * 0.55, Color::new(0.4, 0.48, 0.35, 0.5));
+    // plinth
+    draw_ellipse(
+        cx,
+        y + h - 4.0,
+        w * 0.45,
+        7.0,
+        0.0,
+        Color::new(0.0, 0.0, 0.0, 0.3),
+    );
+    draw_rectangle(x + 8.0, y + h - 26.0, w - 16.0, 22.0, dark);
+    draw_rectangle(x + 12.0, y + h - 32.0, w - 24.0, 8.0, stone);
+    // obelisk
+    draw_triangle(
+        vec2(cx - 9.0, y + h - 32.0),
+        vec2(cx + 9.0, y + h - 32.0),
+        vec2(cx - 6.0, y - 4.0),
+        stone,
+    );
+    draw_triangle(
+        vec2(cx + 9.0, y + h - 32.0),
+        vec2(cx + 6.0, y - 4.0),
+        vec2(cx - 6.0, y - 4.0),
+        stone,
+    );
+    draw_triangle(
+        vec2(cx - 6.0, y - 4.0),
+        vec2(cx + 6.0, y - 4.0),
+        vec2(cx, y - 14.0),
+        dark,
+    );
+    // candles on the plinth, flickering
+    for (i, dx) in [-18.0f32, 18.0].iter().enumerate() {
+        let f = candle(t + i as f32 * 3.7);
+        let (px, py) = (cx + dx, y + h - 34.0);
+        draw_rectangle(
+            px - 2.0,
+            py - 6.0,
+            4.0,
+            6.0,
+            Color::new(0.9, 0.88, 0.8, 1.0),
+        );
+        draw_circle(px, py - 9.0, 6.0 * f, Color::new(1.0, 0.75, 0.3, 0.2));
+        draw_circle(px, py - 8.0, 2.0 * f, Color::new(1.0, 0.85, 0.45, 1.0));
+    }
+}
+fn draw_prop(p: &Prop) {
+    let (x, y) = p.pos;
+
+    let wood = Color::new(0.45, 0.3, 0.17, 1.0);
+    let leaf = Color::new(0.1, 0.25 + 0.1 * p.var, 0.12, 1.0);
+    let stone = Color::new(0.45, 0.45, 0.5, 1.0);
+    let dark = Color::new(0.38, 0.27, 0.14, 1.0);
+
+    match p.kind {
+        PropKind::Tuft => {
+            let c = Color::new(0.12, 0.28 + 0.1 * p.var, 0.14, 1.0);
+            draw_line(x - 3.0, y, x - 5.0, y - 6.0, 1.5, c);
+            draw_line(x, y, x, y - 8.0, 1.5, c);
+            draw_line(x + 3.0, y, x + 5.0, y - 6.0, 1.5, c);
+        }
+        PropKind::Grave => {
+            let h = 16.0 + 6.0 * p.var;
+            draw_ellipse(x, y, 11.0, 4.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(x - 7.0, y - h, 14.0, h, stone);
+            draw_circle(x, y - h, 7.0, stone);
+            draw_rectangle(
+                x - 1.0,
+                y - h + 2.0,
+                2.0,
+                8.0,
+                Color::new(0.3, 0.3, 0.35, 1.0),
+            );
+        }
+        PropKind::Tree => {
+            let light = Color::new(0.15, 0.35 + 0.1 * p.var, 0.17, 1.0);
+            draw_ellipse(x, y, 18.0, 6.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(x - 4.0, y - 24.0, 8.0, 24.0, Color::new(0.3, 0.2, 0.1, 1.0));
+            draw_circle(x - 10.0, y - 28.0, 14.0, leaf);
+            draw_circle(x + 10.0, y - 28.0, 14.0, leaf);
+            draw_circle(x, y - 38.0 - 4.0 * p.var, 20.0, leaf);
+            draw_circle(x - 4.0, y - 44.0 - 4.0 * p.var, 10.0, light);
+        }
+        PropKind::Bush => {
+            draw_ellipse(x, y, 12.0, 4.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_circle(x - 6.0, y - 6.0, 7.0, leaf);
+            draw_circle(x, y - 10.0, 8.0, leaf);
+        }
+        PropKind::Rock => {
+            let g = 0.4 + 0.1 * p.var;
+            draw_ellipse(x, y, 11.0, 4.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_ellipse(x, y - 4.0, 9.0, 6.0, 0.0, Color::new(g, g, g + 0.03, 1.0));
+            draw_ellipse(
+                x - 2.0,
+                y - 6.0,
+                4.0,
+                2.0,
+                0.0,
+                Color::new(g + 0.15, g + 0.15, g + 0.18, 1.0),
+            );
+        }
+        PropKind::Barrel => {
+            let band = Color::new(0.2, 0.18, 0.16, 1.0);
+            draw_ellipse(x, y, 9.0, 3.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(x - 6.0, y - 16.0, 12.0, 16.0, wood);
+            draw_line(x - 6.0, y - 12.0, x + 6.0, y - 4.0, 1.5, band);
+            draw_line(x - 6.0, y - 4.0, x + 6.0, y - 4.0, 1.5, band);
+            draw_ellipse(x, y - 16.0, 6.0, 2.0, 0.0, Color::new(0.5, 0.34, 0.18, 1.0));
+        }
+        PropKind::Crate => {
+            draw_ellipse(x, y, 10.0, 3.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(x - 7.0, y - 14.0, 14.0, 14.0, wood);
+            draw_rectangle_lines(x - 7.0, y - 14.0, 14.0, 14.0, 1.5, dark);
+            draw_line(x - 7.0, y - 14.0, x + 7.0, y, 1.0, dark);
+            draw_line(x + 7.0, y - 14.0, x - 7.0, y, 1.0, dark);
+        }
+        PropKind::Well => {
+            let post = Color::new(0.3, 0.2, 0.1, 1.0);
+            draw_ellipse(x, y, 18.0, 6.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_ellipse(x, y - 6.0, 15.0, 8.0, 0.0, stone);
+            draw_ellipse(x, y - 7.0, 10.0, 5.0, 0.0, Color::new(0.08, 0.12, 0.2, 1.0));
+            draw_rectangle(x - 15.0, y - 32.0, 3.0, 26.0, post);
+            draw_rectangle(x + 15.0, y - 32.0, 3.0, 26.0, post);
+            draw_triangle(
+                vec2(x - 19.0, y - 30.0),
+                vec2(x + 19.0, y - 30.0),
+                vec2(x, y - 44.0),
+                Color::new(0.35, 0.2, 0.15, 1.0),
+            );
+        }
+        PropKind::Lamp => {
+            draw_ellipse(x, y, 5.0, 2.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(
+                x - 1.5,
+                y - 30.0,
+                3.0,
+                30.0,
+                Color::new(0.15, 0.13, 0.12, 1.0),
+            );
+            draw_circle(x, y - 33.0, 8.0, Color::new(1.0, 0.8, 0.4, 0.15));
+            draw_circle(x, y - 33.0, 4.0, Color::new(1.0, 0.85, 0.45, 1.0));
+        }
+        PropKind::Bench => {
+            draw_ellipse(x, y, 16.0, 3.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.3));
+            draw_rectangle(x - 13.0, y - 6.0, 3.0, 6.0, wood);
+            draw_rectangle(x + 10.0, y - 6.0, 3.0, 6.0, wood);
+            draw_rectangle(x - 15.0, y - 10.0, 30.0, 4.0, wood);
+            draw_rectangle(x - 15.0, y - 18.0, 30.0, 3.0, wood);
+        }
+    }
+}
+
+fn rects_overlap(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
+    a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.3 && a.1 + a.3 > b.1
+}
+
+fn rect_distance(p: (f32, f32), r: (f32, f32, f32, f32)) -> f32 {
+    let dx = (r.0 - p.0).max(0.0).max(p.0 - (r.0 + r.2));
+    let dy = (r.1 - p.1).max(0.0).max(p.1 - (r.1 + r.3));
+    (dx * dx + dy * dy).sqrt()
+}
 // Theme/Discovery Tiers
 fn load_tiers() -> Vec<Tier> {
-    let data = std::fs::read_to_string("data/progression.ron")
-        .expect("failed to read data/progression.ron");
-    ron::from_str(&data).expect("failed to parse data/progression.ron")
+    ron::from_str(data("progression.ron")).expect("failed to parse data/progression.ron")
 }
 
 fn slot_of(themes: &[String], zone_id: &str) -> Option<usize> {
@@ -278,13 +661,31 @@ fn tier_for(tiers: &[Tier], slot: usize) -> &Tier {
 
 // Reagents caller
 fn load_reagent_defs() -> HashMap<String, Reagent> {
-    let data = std::fs::read_to_string("data/items.ron").expect("failed to read data/items.ron");
-    let reagents: Vec<Reagent> = ron::from_str(&data).expect("failed to parse data/items.ron");
+    let reagents: Vec<Reagent> =
+        ron::from_str(data("items.ron")).expect("failed to parse data/items.ron");
     reagents.into_iter().map(|r| (r.id.clone(), r)).collect()
+}
+
+fn selected_reagent_list(selected: &[String], defs: &HashMap<String, Reagent>) -> Vec<Reagent> {
+    selected
+        .iter()
+        .filter_map(|id| defs.get(id).cloned())
+        .collect()
 }
 
 fn selected_count(sel: &[String], id: &str) -> usize {
     sel.iter().filter(|s| s.as_str() == id).count()
+}
+
+fn preview_rite<'a>(
+    selected: &[String],
+    reagent_defs: &HashMap<String, Reagent>,
+    factions: &'a [FactionDef],
+    disposal: RiteDisposal,
+) -> Vec<(&'a FactionDef, f32)> {
+    let mut rite = resolve_rite(&selected_reagent_list(selected, reagent_defs));
+    rite.add_disposal(disposal);
+    factions.iter().map(|f| (f, f.delta_for(&rite))).collect()
 }
 
 fn add_reagent(sel: &mut Vec<String>, id: &str, owned: u32, log: &mut Vec<String>) -> bool {
@@ -305,63 +706,49 @@ fn remove_reagent(sel: &mut Vec<String>, id: &str) {
         sel.remove(i);
     }
 }
+
 // faction caller
 fn load_faction_defs() -> Vec<FactionDef> {
-    let data =
-        std::fs::read_to_string("data/factions.ron").expect("failed to read data/factions.ron");
-    ron::from_str(&data).expect("failed to parse data/factions.ron")
+    ron::from_str(data("factions.ron")).expect("failed to parse data/factions.ron")
 }
+
 // zone caller
 fn load_zone_defs() -> Vec<zone::ZoneDef> {
-    let data = std::fs::read_to_string("data/zones.ron").expect("failed to read data/zones.ron");
-    ron::from_str(&data).expect("failed to parse data/zones.ron")
+    ron::from_str(data("zones.ron")).expect("failed to parse data/zones.ron")
 }
 
 // load npcs
 fn load_npcs() -> Vec<Npc> {
-    let data = std::fs::read_to_string("data/npcs.ron").expect("failed to read data/npcs.ron");
-    ron::from_str(&data).expect("failed to parse data/npcs.ron")
+    ron::from_str(data("npcs.ron")).expect("failed to parse data/npcs.ron")
 }
 
 // load milestones
 fn load_milestones() -> Vec<Milestone> {
-    let data =
-        std::fs::read_to_string("data/milestones.ron").expect("failed to read data/milestones.ron");
-    ron::from_str(&data).expect("failed to parse data/milestones.ron")
+    ron::from_str(data("milestones.ron")).expect("failed to parse data/milestones.ron")
 }
 
 fn load_tutorial() -> Vec<TutorialStep> {
-    let data =
-        std::fs::read_to_string("data/tutorial.ron").expect("failed to read data/tutorial.ron");
-    ron::from_str(&data).expect("failed to parse data/tutorial.ron")
+    ron::from_str(data("tutorial.ron")).expect("failed to parse data/tutorial.ron")
 }
+
 fn load_story_beats() -> Vec<StoryBeat> {
-    let data = std::fs::read_to_string("data/story_beats.ron")
-        .expect("failed to read data/story_beats.ron");
-    ron::from_str(&data).expect("failed to parse data/story_beats.ron")
+    ron::from_str(data("story_beats.ron")).expect("failed to parse data/story_beats.ron")
 }
 
 fn load_cellar_records() -> Vec<CellarRecord> {
-    let data = std::fs::read_to_string("data/cellar_records.ron")
-        .expect("failed to read data/cellar_records.ron");
-    ron::from_str(&data).expect("failed to parse data/cellar_records.ron")
+    ron::from_str(data("cellar_records.ron")).expect("failed to parse data/cellar_records.ron")
 }
 
 fn load_discoveries() -> Vec<Discovery> {
-    let data = std::fs::read_to_string("data/discoveries.ron")
-        .expect("failed to read data/discoveries.ron");
-    ron::from_str(&data).expect("failed to parse data/discoveries.ron")
+    ron::from_str(data("discoveries.ron")).expect("failed to parse data/discoveries.ron")
 }
 
 fn load_tending() -> Vec<TendTask> {
-    let data =
-        std::fs::read_to_string("data/tending.ron").expect("failed to read data/tending.ron");
-    ron::from_str(&data).expect("failed to parse data/tending.ron")
+    ron::from_str(data("tending.ron")).expect("failed to parse data/tending.ron")
 }
 
 fn load_quests() -> Vec<QuestDef> {
-    let data = std::fs::read_to_string("data/quests.ron").expect("failed to read data/quests.ron");
-    ron::from_str(&data).expect("failed to parse data/quests.ron")
+    ron::from_str(data("quests.ron")).expect("failed to parse data/quests.ron")
 }
 
 fn fire_tutorial(
@@ -381,15 +768,7 @@ fn fire_tutorial(
     }
 }
 
-fn tilemap_path(map: &MapId) -> String {
-    match map {
-        MapId::Hub => "data/tilemap.hub.ron".to_string(),
-        MapId::Village(id) => format!("data/tilemap_{id}.ron"),
-    }
-}
-
 fn load_or_generate_tilemap(
-    path: &str,
     width: usize,
     height: usize,
     tile_size: f32,
@@ -397,8 +776,8 @@ fn load_or_generate_tilemap(
     hub_world: (f32, f32),
     targets: &[(f32, f32)],
 ) -> render::TileMapDef {
-    if let Ok(data) = std::fs::read_to_string(path) {
-        if let Ok(def) = ron::from_str(&data) {
+    if let Some(f) = DATA.get_file("tilemap.hub.ron") {
+        if let Ok(def) = ron::from_str(f.contents_utf8().unwrap_or("")) {
             return def;
         }
     }
@@ -506,15 +885,15 @@ fn window_conf() -> Conf {
 
 async fn load_assets(assets: &mut AssetStore) {
     const LIST: [(&str, &str); 9] = [
-        ("grass", "assets/tiles/grass.png"),
-        ("path", "assets/tiles/path.png"),
-        ("player", "assets/sprites/player.png"),
-        ("npc_elsbet", "assets/sprites/npc_elsbet.png"),
-        ("npc_wren", "assets/sprites/npc_wren.png"),
-        ("npc_halbrecht", "assets/sprites/npc_halbrecht.png"),
-        ("npc_tamsin", "assets/sprites/npc_tamsin.png"),
-        ("npc_odo", "assets/sprites/npc_odo.png"),
-        ("npc_maren", "assets/sprites/npc_maren.png"),
+        ("grass", "tiles/grass.png"),
+        ("path", "tiles/path.png"),
+        ("player", "sprites/player.png"),
+        ("npc_elsbet", "sprites/npc_elsbet.png"),
+        ("npc_wren", "sprites/npc_wren.png"),
+        ("npc_halbrecht", "sprites/npc_halbrecht.png"),
+        ("npc_tamsin", "sprites/npc_tamsin.png"),
+        ("npc_odo", "sprites/npc_odo.png"),
+        ("npc_maren", "sprites/npc_maren.png"),
     ];
     for (i, (id, path)) in LIST.iter().enumerate() {
         clear_background(Color::new(0.05, 0.05, 0.07, 1.0));
@@ -531,30 +910,34 @@ async fn load_assets(assets: &mut AssetStore) {
         draw_text(&format!("Loading {id}..."), bx, by + 40.0, 18.0, GRAY);
 
         next_frame().await;
-        assets.load(id, path).await;
+
+        let file = ASSETS
+            .get_file(path)
+            .unwrap_or_else(|| panic!("missing asset {path}"));
+        assets.load(id, file.contents());
     }
 }
 
-async fn main_menu() -> MenuChoice {
+async fn main_menu(ui: &Ui) -> MenuChoice {
     let has_save = std::path::Path::new("save.ron").exists();
     loop {
         clear_background(Color::new(0.05, 0.05, 0.07, 1.0));
         let (sw, sh) = (screen_width(), screen_height());
         let title = "THE LATEST KEEPER";
-        let d = measure_text(title, None, 64, 1.0);
-        draw_text(title, (sw - d.width) / 2.0, sh * 0.25, 64.0, WHITE);
+        let d = ui.measure(title, 64.0);
+        ui.text(title, (sw - d.width) / 2.0, sh * 0.25, 64.0, WHITE);
 
         let (bw, bh) = (300.0, 52.0);
         let x = (sw - bw) / 2.0;
         let y0 = sh * 0.4;
-        if menu_button((x, y0 + 70.0, bw, bh), "New Game", true) {
+        if ui.button((x, y0 + 70.0, bw, bh), "New Game", true) {
             return MenuChoice::NewGame;
         }
-        if menu_button((x, y0, bw, bh), "Continue", has_save) {
+        if ui.button((x, y0, bw, bh), "Continue", has_save) {
             return MenuChoice::Continue;
         }
 
-        if menu_button((x, y0 + 140.0, bw, bh), "Quit", true) {
+        if ui.button((x, y0 + 140.0, bw, bh), "Quit", true) {
             return MenuChoice::Quit;
         }
 
@@ -567,8 +950,10 @@ async fn main() {
     let mut assets = AssetStore::new();
     load_assets(&mut assets).await;
 
+    let ui = Ui::new(ASSETS.get_file("fonts/ui.ttf").map(|f| f.contents()));
+
     loop {
-        let choice = main_menu().await;
+        let choice = main_menu(&ui).await;
         if matches!(choice, MenuChoice::Quit) {
             return;
         }
@@ -579,9 +964,7 @@ async fn main() {
         let mut log: Vec<String> = Vec::new();
         let mut active_window = ActiveWindow::None;
         let mut current_map = MapId::Hub;
-        let mut edit_mode = false;
         let mut selected_tool: Option<usize> = None;
-        let mut edit_tile_id: String = "path".to_string();
 
         // Game cache
         let mut village_cache: HashMap<String, VillageInstance> = HashMap::new();
@@ -594,7 +977,8 @@ async fn main() {
             Some(("Another day among the dead...".to_string(), 8.0));
         let mut player_inventory: HashMap<String, u32> = HashMap::new();
         let mut facing = vec2(0.0, 1.0); // defailt facing: down
-                                         // Static defs
+        let mut walk_t: f32 = 0.0;
+
         let reagent_defs = load_reagent_defs();
         let mut selected_reagents: Vec<String> = Vec::new();
         let mut reagent_order: Vec<String> = reagent_defs.keys().cloned().collect();
@@ -629,7 +1013,6 @@ async fn main() {
         let hub_world = (0.0, 0.0);
 
         let tilemap_def = load_or_generate_tilemap(
-            &tilemap_path(&MapId::Hub),
             width,
             height,
             tile_size,
@@ -639,6 +1022,16 @@ async fn main() {
         );
         let mut tilemap = render::TileMap::from_def(&tilemap_def);
         let hub_tilemap_def = tilemap_def.clone();
+        let mut map_solids = hub_tilemap_def.solids.clone();
+
+        // Props
+        let mut hub_props = gen_props(&hub_tilemap_def, &zones, 1);
+        entrance_trees(&hub_tilemap_def, &zones, &mut hub_props);
+        let mut props = hub_props.clone();
+
+        // User Interface
+        let mut floaters: Vec<Floater> = Vec::new();
+        let mut particles: Vec<Particle> = Vec::new();
 
         // Story beats
         let story_beats = load_story_beats();
@@ -682,6 +1075,12 @@ async fn main() {
         let mut last_seen_day: u32 = clock.day_index;
         let mut missed_days_this_tenure: u32 = 0;
         let mut sacrifice_selection: HashMap<String, u32> = HashMap::new();
+
+        let mut bound_this_life: u32 = 0;
+        let mut empty_rite_armed = false;
+        // (elapsed secs, respawn position, teleport done)
+        let mut sacrifice_fade: Option<(f32, Vec2, bool)> = None;
+        let mut travel_fade: Option<f32> = None;
 
         // Cellar
         let mut cellar_records = load_cellar_records();
@@ -727,6 +1126,7 @@ async fn main() {
         // Quest progress
         const CARRY_OVER: f32 = 0.2;
         let mut check_progress = false;
+        let mut zone_debug = false;
 
         // Taskbar keys
         const TASKBAR_KEYS: [KeyCode; 9] = [
@@ -776,16 +1176,6 @@ async fn main() {
             t
         };
         'game: loop {
-            draw_texture_ex(
-                &vignette_tex,
-                0.0,
-                0.0,
-                WHITE,
-                DrawTextureParams {
-                    dest_size: Some(vec2(screen_width(), screen_height())),
-                    ..Default::default()
-                },
-            );
             if is_key_pressed(KeyCode::Escape) {
                 if matches!(active_window, ActiveWindow::None) {
                     paused = !paused;
@@ -800,33 +1190,33 @@ async fn main() {
                 set_default_camera();
                 clear_background(Color::new(0.03, 0.03, 0.05, 1.0));
                 let (sw, sh) = (screen_width(), screen_height());
-                let d = measure_text("PAUSED", None, 56, 1.0);
-                draw_text("PAUSED", (sw - d.width) / 2.0, sh * 0.25, 56.0, WHITE);
+                let d = ui.measure("PAUSED", 56.0);
+                ui.text("PAUSED", (sw - d.width) / 2.0, sh * 0.25, 56.0, WHITE);
 
                 let (bw, bh) = (300.0, 52.0);
                 let x = (sw - bw) / 2.0;
                 let y0 = sh * 0.35;
                 let has_save = std::path::Path::new("save.ron").exists();
 
-                if menu_button((x, y0, bw, bh), "Resume", true) {
+                if ui.button((x, y0, bw, bh), "Resume", true) {
                     paused = false;
                 }
 
-                if menu_button((x, y0 + 70.0, bw, bh), "Save Game", true) {
+                if ui.button((x, y0 + 70.0, bw, bh), "Save Game", true) {
                     request_save = true;
                     paused = false;
                 }
 
-                if menu_button((x, y0 + 140.0, bw, bh), "Load Game", has_save) {
+                if ui.button((x, y0 + 140.0, bw, bh), "Load Game", has_save) {
                     request_load = true;
                     paused = false;
                 }
 
-                if menu_button((x, y0 + 210.0, bw, bh), "Quit to Menu", true) {
+                if ui.button((x, y0 + 210.0, bw, bh), "Quit to Menu", true) {
                     break 'game;
                 }
 
-                if menu_button((x, y0 + 280.0, bw, bh), "Quit Game", true) {
+                if ui.button((x, y0 + 280.0, bw, bh), "Quit Game", true) {
                     return;
                 }
 
@@ -853,7 +1243,7 @@ async fn main() {
                 .map_or(false, |c| c.current_quality() <= 0.0)
             {
                 let c = corpse.take().unwrap();
-                log.push(format!("Corpse #{}  rotted away untended.", c.id));
+                log.push(format!("Corpse #{} rotted away untended.", c.id));
                 missed_days_this_tenure += 1;
             }
             if corpse.is_none() {
@@ -888,14 +1278,79 @@ async fn main() {
                     tutorial_banner = None;
                 }
             }
-            ////////////////////
-            // Keyboard keys  //
-            ////////////////////
 
-            let ui_open = !matches!(active_window, ActiveWindow::None);
+            let mut fade_done = false;
+            if let Some((t, target, moved)) = sacrifice_fade.as_mut() {
+                *t += get_frame_time();
+                if *t >= FADE_OUT_SECS && !*moved {
+                    // screen is fully black
+                    player_pos = *target;
+                    facing = vec2(0.0, 1.0);
+                    player_speech = Some(("Another morning among the dead...".to_string(), 6.0));
+                    *moved = true;
+                }
+                fade_done = *t >= FADE_TOTAL_SECS;
+            }
+            if fade_done {
+                sacrifice_fade = None;
+            }
+            if let Some(t) = travel_fade.as_mut() {
+                *t += get_frame_time();
+                if *t >= TRAVEL_FADE_SECS {
+                    travel_fade = None;
+                }
+            }
+            let ui_open = !matches!(active_window, ActiveWindow::None | ActiveWindow::Inventory)
+                || sacrifice_fade.is_some();
+
+            let mut solids = map_solids.clone();
+            for n in &npcs {
+                let visible = match &n.zone_id {
+                    Some(zid) => discoveries
+                        .iter()
+                        .any(|d| &d.zone_id == zid && discovered_zones.contains(&d.id)),
+                    None => true,
+                };
+                if visible && n.is_active(&clock) {
+                    solids.push((n.position.0 - 6.0, n.position.1 + 4.0, 12.0, 8.0));
+                }
+            }
+            for z in zones.zones.values() {
+                if let Some((side, door)) = z.door {
+                    solids.extend(wall_rects(
+                        (z.position.0, z.position.1, z.size.0, z.size.1),
+                        side,
+                        door,
+                    ));
+                }
+            }
+
+            if let Some(m) = zones.zones.get("memorial") {
+                solids.push((
+                    m.position.0 + 8.0,
+                    m.position.1 + m.size.1 - 26.0,
+                    m.size.0 - 16.0,
+                    22.0,
+                ));
+            }
+
+            for p in &props {
+                match p.kind {
+                    PropKind::Tree => solids.push((p.pos.0 - 6.0, p.pos.1 - 8.0, 12.0, 8.0)),
+                    PropKind::Rock => solids.push((p.pos.0 - 8.0, p.pos.1 - 6.0, 16.0, 6.0)),
+                    PropKind::Grave => solids.push((p.pos.0 - 8.0, p.pos.1 - 6.0, 16.0, 6.0)),
+                    PropKind::Barrel => solids.push((p.pos.0 - 6.0, p.pos.1 - 6.0, 12.0, 6.0)),
+                    PropKind::Crate => solids.push((p.pos.0 - 7.0, p.pos.1 - 6.0, 14.0, 6.0)),
+                    PropKind::Well => solids.push((p.pos.0 - 15.0, p.pos.1 - 12.0, 30.0, 12.0)),
+                    PropKind::Lamp => solids.push((p.pos.0 - 2.0, p.pos.1 - 4.0, 4.0, 4.0)),
+                    PropKind::Bench => solids.push((p.pos.0 - 15.0, p.pos.1 - 6.0, 30.0, 6.0)),
+                    PropKind::Tuft | PropKind::Bush => {}
+                }
+            }
 
             // Directional Keys
             let mut move_dir = vec2(0.0, 0.0);
+
             if is_key_down(KeyCode::W) || is_key_down(KeyCode::Up) {
                 move_dir.y -= 1.0;
             }
@@ -915,7 +1370,16 @@ async fn main() {
                 facing = move_dir.normalize();
             }
             if move_dir.length() > 0.0 {
-                player_pos += move_dir.normalize() * player_speed * get_frame_time();
+                walk_t += get_frame_time() * 12.0;
+            } else {
+                walk_t = 0.0;
+            }
+            let step = move_dir.normalize_or_zero() * player_speed * get_frame_time();
+            if !blocked(vec2(player_pos.x + step.x, player_pos.y), &solids) {
+                player_pos.x += step.x;
+            }
+            if !blocked(vec2(player_pos.x, player_pos.y + step.y), &solids) {
+                player_pos.y += step.y;
             }
 
             let interaction_point = (
@@ -938,8 +1402,36 @@ async fn main() {
                             ActionKind::Autopsy => {
                                 if let Some(c) = corpse.as_mut() {
                                     c.autopsy();
+                                    let mut bonus = 0.0;
+                                    selected_reagents.retain(|id| {
+                                        let preserved = reagent_defs.get(id).map_or(false, |r| {
+                                            r.tags.len() == 1 && r.tags[0] == "preserved"
+                                        });
+                                        if preserved {
+                                            if let Some(n) = player_inventory.get_mut(id) {
+                                                if *n > 0 {
+                                                    *n -= 1;
+                                                    bonus += 0.25;
+                                                    return false;
+                                                }
+                                            }
+                                        }
+                                        true
+                                    });
+                                    c.preserved_bonus = bonus;
+
+                                    if bonus > 0.0 {
+                                        fire_tutorial(
+                                            &tutorial_steps,
+                                            &mut fired_tutorial,
+                                            "first_preserved",
+                                            &mut log,
+                                            &mut tutorial_banner,
+                                        );
+                                    }
                                     log.push(format!("corpse #{} examined.", c.id));
                                 }
+
                                 fire_tutorial(
                                     &tutorial_steps,
                                     &mut fired_tutorial,
@@ -1015,6 +1507,13 @@ async fn main() {
                         if quest_defs.iter().any(|q| q.npc_id == npc.id) {
                             npc_dialogue = Some(npc.id.clone());
                             active_window = ActiveWindow::Dialogue;
+                            fire_tutorial(
+                                &tutorial_steps,
+                                &mut fired_tutorial,
+                                "first_quest_offer",
+                                &mut log,
+                                &mut tutorial_banner,
+                            )
                         }
                         handled = true;
                     }
@@ -1030,15 +1529,19 @@ async fn main() {
                             let zone_name = zone.name.clone();
                             hub_player_pos = player_pos;
                             current_map = MapId::Village(zone_id.clone());
-                            let instance =
-                                village_cache.entry(zone_id.clone()).or_insert_with(|| {
-                                    generate_village(&zone_id, rand::gen_range(0, u64::MAX) as u64)
-                                });
+                            let seed = seed_for(&zone_id, &village_cache);
+                            let instance = village_cache
+                                .entry(zone_id.clone())
+                                .or_insert_with(|| generate_village(&zone_id, seed));
                             tilemap = render::TileMap::from_def(&instance.tilemap);
+                            map_solids = instance.tilemap.solids.clone();
                             std::mem::swap(&mut zones, &mut instance.zones);
                             std::mem::swap(&mut npcs, &mut instance.npcs);
+                            props = village_props(instance, &zones);
                             player_pos = vec2(0.0, 150.0);
+
                             log.push(format!("You step into {}", zone_name));
+                            travel_fade = Some(0.0);
                             fire_tutorial(
                                 &tutorial_steps,
                                 &mut fired_tutorial,
@@ -1099,11 +1602,18 @@ async fn main() {
                             if burn_timer.is_none() {
                                 burn_timer = Some(STOKE_SECS);
                                 log.push("You light the fire. It needs time.".to_string());
+                                fire_tutorial(
+                                    &tutorial_steps,
+                                    &mut fired_tutorial,
+                                    "first_incinerator",
+                                    &mut log,
+                                    &mut tutorial_banner,
+                                );
                             }
                             None
                         }
                         CorpseState::Delivered => {
-                            log.push("Examined the corpse in the Morgue first.".to_string());
+                            log.push("Examine the corpse in the Morgue first.".to_string());
                             None
                         }
                         _ => None,
@@ -1115,20 +1625,26 @@ async fn main() {
                 }
             }
 
-            if is_key_pressed(KeyCode::I) {
+            if is_key_pressed(KeyCode::I)
+                && matches!(active_window, ActiveWindow::None | ActiveWindow::Inventory)
+            {
                 active_window = match active_window {
                     ActiveWindow::Inventory => ActiveWindow::None,
                     _ => ActiveWindow::Inventory,
                 };
             }
 
-            if is_key_pressed(KeyCode::Q) {
+            if is_key_pressed(KeyCode::Q)
+                && matches!(active_window, ActiveWindow::None | ActiveWindow::QuestLog)
+            {
                 active_window = match active_window {
                     ActiveWindow::QuestLog => ActiveWindow::None,
                     _ => ActiveWindow::QuestLog,
                 }
             }
-            if is_key_pressed(KeyCode::M) {
+            if is_key_pressed(KeyCode::M)
+                && matches!(active_window, ActiveWindow::None | ActiveWindow::GameMap)
+            {
                 active_window = match active_window {
                     ActiveWindow::GameMap => ActiveWindow::None,
                     _ => ActiveWindow::GameMap,
@@ -1160,20 +1676,40 @@ async fn main() {
                                 .reputation
                                 .entry(task.faction_id.clone())
                                 .or_insert(0.0) += task.amount;
+                            float(
+                                &mut floaters,
+                                format!("{:+.1} {}", task.amount, task.faction_id),
+                                player_pos,
+                                faction_color(&task.faction_id),
+                                0,
+                            );
                         }
 
                         if let Some(stipend) = task.stipend_amount {
                             economy.stipend += stipend;
+                            float(
+                                &mut floaters,
+                                format!("+{stipend:.1} stipend"),
+                                player_pos,
+                                GOLD,
+                                1,
+                            );
                         }
+
                         log.push(task.flavor_text.clone());
                         last_tended.insert(task.zone_id.clone(), clock.day_index);
                         check_progress = true;
+                        fire_tutorial(
+                            &tutorial_steps,
+                            &mut fired_tutorial,
+                            "first_tend",
+                            &mut log,
+                            &mut tutorial_banner,
+                        );
 
-                        if let Some(&(_, grounds_id, item_id)) =
-                            VILLAGE_STOCK.iter().find(|&&(_, g, _)| g == task.zone_id)
-                        {
-                            if let Some(z) = zones.zones.get_mut(grounds_id) {
-                                z.deposit(item_id, 1);
+                        if !task.restock_item.is_empty() && task.restock_amount > 0 {
+                            if let Some(z) = zones.zones.get_mut(&task.zone_id) {
+                                z.deposit(&task.restock_item, task.restock_amount);
                             }
                         }
                     }
@@ -1181,42 +1717,7 @@ async fn main() {
             }
 
             // F-keys
-            if is_key_pressed(KeyCode::F2) {
-                edit_mode = !edit_mode;
-                log.push(if edit_mode {
-                        "Map edit mode ON - left click paints, right click erases grass, [ / ] switches tile, F6 saves.".to_string()
-                    } else {
-                        "Map edit mode OFF.".to_string()
-                    });
-            }
-            if edit_mode {
-                if is_key_pressed(KeyCode::LeftBracket) {
-                    edit_tile_id = "grass".to_string();
-                }
-                if is_key_pressed(KeyCode::RightBracket) {
-                    edit_tile_id = "path".to_string();
-                }
 
-                let (mx, my) = mouse_position();
-                let world_mouse = cam.camera.screen_to_world(vec2(mx, my));
-                if is_mouse_button_down(MouseButton::Left) {
-                    if let Some((row, col)) = tilemap.grid_pos(world_mouse) {
-                        tilemap.set_tile(row, col, &edit_tile_id);
-                    }
-                }
-                if is_mouse_button_down(MouseButton::Right) {
-                    if let Some((row, col)) = tilemap.grid_pos(world_mouse) {
-                        tilemap.set_tile(row, col, "grass")
-                    }
-                }
-                if is_key_pressed(KeyCode::F6) {
-                    let path = tilemap_path(&current_map);
-                    match std::fs::write(&path, tilemap.to_ron()) {
-                        Ok(()) => log.push(format!("Map saved to {path}.")),
-                        Err(e) => log.push(format!("Map save failed: {e}")),
-                    }
-                }
-            }
             if is_key_pressed(KeyCode::F5) || std::mem::take(&mut request_save) {
                 fn snapshot_stock(z: &ZoneRegistry) -> HashMap<String, HashMap<String, u32>> {
                     z.zones
@@ -1284,6 +1785,7 @@ async fn main() {
                     last_restock_day,
                     corpse: corpse.clone(),
                     burn_timer,
+                    bound_this_life,
                 };
 
                 match save_game(&data, "save.ron") {
@@ -1334,6 +1836,7 @@ async fn main() {
                         active_window = ActiveWindow::None;
                         npc_dialogue = None;
                         selected_reagents.clear();
+                        floaters.clear();
                         last_delivery_day = data.last_delivery_day;
                         last_restock_day = data.last_restock_day;
                         pair_index = data.pair_index;
@@ -1341,7 +1844,9 @@ async fn main() {
                         chosen_themes = data.chosen_themes;
                         corpse = data.corpse;
                         burn_timer = data.burn_timer;
-
+                        bound_this_life = data.bound_this_life;
+                        empty_rite_armed = false;
+                        sacrifice_fade = None;
                         // Rebuild villages from seeds
                         village_cache.clear();
                         for (vid, seed) in &data.village_seeds {
@@ -1366,13 +1871,17 @@ async fn main() {
                             Some(vid) => {
                                 if let Some(inst) = village_cache.get_mut(vid) {
                                     tilemap = render::TileMap::from_def(&inst.tilemap);
+                                    map_solids = inst.tilemap.solids.clone();
                                     std::mem::swap(&mut zones, &mut inst.zones);
                                     std::mem::swap(&mut npcs, &mut inst.npcs);
+                                    props = village_props(inst, &zones);
                                     current_map = MapId::Village(vid.clone());
                                 }
                             }
                             None => {
                                 tilemap = render::TileMap::from_def(&hub_tilemap_def);
+                                map_solids = hub_tilemap_def.solids.clone();
+                                props = hub_props.clone();
                             }
                         }
                         log.push("Game loaded.".to_string());
@@ -1421,11 +1930,10 @@ async fn main() {
                     if !found {
                         continue;
                     }
+                    let seed = seed_for(village_id, &village_cache);
                     village_cache
                         .entry(village_id.to_string())
-                        .or_insert_with(|| {
-                            generate_village(village_id, rand::gen_range(0, u64::MAX) as u64)
-                        });
+                        .or_insert_with(|| generate_village(village_id, seed));
                     if let Some(vz) =
                         village_zones_mut(village_id, &current_map, &mut zones, &mut village_cache)
                     {
@@ -1451,14 +1959,19 @@ async fn main() {
                     if point_in_rect((player_pos.x, player_pos.y), instance.exit_zone) {
                         current_map = MapId::Hub;
                         tilemap = render::TileMap::from_def(&hub_tilemap_def);
+                        map_solids = hub_tilemap_def.solids.clone();
                         std::mem::swap(&mut zones, &mut instance.zones);
                         std::mem::swap(&mut npcs, &mut instance.npcs);
+                        props = hub_props.clone();
                         player_pos = hub_player_pos;
                         log.push("You return to the graveyard.".to_string());
+                        travel_fade = Some(0.0);
                     }
                 }
             }
-            if is_key_pressed(KeyCode::C) {
+            if is_key_pressed(KeyCode::C)
+                && matches!(active_window, ActiveWindow::None | ActiveWindow::Cellar)
+            {
                 if player_in_cellar {
                     let opening = !matches!(active_window, ActiveWindow::Cellar);
                     active_window = match active_window {
@@ -1493,6 +2006,9 @@ async fn main() {
                 Some(CorpseState::Fueled) => at_incinerator,
                 _ => false,
             };
+            if !can_dispose {
+                empty_rite_armed = false;
+            }
 
             if is_key_pressed(KeyCode::Space) && can_dispose && !ui_open {
                 if let Some(c) = corpse.as_mut() {
@@ -1507,27 +2023,38 @@ async fn main() {
                             }
                         }
                     }
-                    if available.is_empty() {
-                        log.push("No reagents available.".to_string());
+                    if available.is_empty() && !empty_rite_armed {
+                        empty_rite_armed = true;
+                        fire_tutorial(
+                            &tutorial_steps,
+                            &mut fired_tutorial,
+                            "first_empty_rite",
+                            &mut log,
+                            &mut tutorial_banner,
+                        );
+                        log.push("No reagents selected. Press [SPACE] again".to_string());
                     } else {
+                        empty_rite_armed = false;
                         let requested_tag = c.requested_tag.clone();
                         let quality_at_burial = c.current_quality();
 
                         let mut rite = resolve_rite(&available);
+                        // bound weight counts towards extra sacrifice carry slots
+                        bound_this_life += rite.tags.get("bound").copied().unwrap_or(0.0) as u32;
 
                         let request_met = requested_tag
                             .as_ref()
                             .map_or(false, |t| rite.tags.contains_key(t));
-                        let hidden_tag = if c.state == CorpseState::GraveDug {
-                            "holy"
-                        } else {
-                            "profane"
-                        };
-
                         let base_tags: Vec<String> = rite.tags.keys().cloned().collect();
-                        *rite.tags.entry(hidden_tag.to_string()).or_insert(0.0) += DISPOSAL_WEIGHT;
+
+                        rite.add_disposal(if c.state == CorpseState::GraveDug {
+                            RiteDisposal::Burial
+                        } else {
+                            RiteDisposal::Burning
+                        });
 
                         c.assign_rite(rite);
+
                         let (performed_rite, method) = c.dispose();
 
                         for quest in &quest_defs {
@@ -1556,6 +2083,13 @@ async fn main() {
                                 log.push(format!(
                                     "Request fulfilled ({tag}): +{bonus:.1} bonus stipend"
                                 ));
+                                float(
+                                    &mut floaters,
+                                    format!("{tag} request met"),
+                                    player_pos,
+                                    GOLD,
+                                    4,
+                                );
                             }
                         }
                         let verb = match method {
@@ -1567,11 +2101,29 @@ async fn main() {
                             c.id, result.payment
                         ));
 
-                        for (faction_id, delta) in &result.reputation_deltas {
+                        float(
+                            &mut floaters,
+                            format!("+{:.1} stipend", result.payment),
+                            player_pos,
+                            GOLD,
+                            0,
+                        );
+
+                        for (row, (faction_id, delta)) in
+                            result.reputation_deltas.iter().enumerate()
+                        {
                             log.push(format!("    {faction_id}: {delta:+.1} reputation"));
+                            float(
+                                &mut floaters,
+                                format!("{delta:+.1} {faction_id}"),
+                                player_pos,
+                                faction_color(faction_id),
+                                row + 1,
+                            );
                         }
 
-                        if result.reputation_deltas.values().any(|d| *d > 0.0)
+                        if fired_tutorial.contains("tut_burial")
+                            && result.reputation_deltas.values().any(|d| *d > 0.0)
                             && result.reputation_deltas.values().any(|d| *d < 0.0)
                         {
                             fire_tutorial(
@@ -1582,6 +2134,7 @@ async fn main() {
                                 &mut tutorial_banner,
                             );
                         }
+
                         check_progress = true;
 
                         let mut seen: HashMap<String, u32> = HashMap::new();
@@ -1641,6 +2194,15 @@ async fn main() {
                     if rep >= need {
                         log.push(milestone.announce_text.clone());
                         sacrifice_available = true;
+
+                        fire_tutorial(
+                            &tutorial_steps,
+                            &mut fired_tutorial,
+                            "first_sacrifice_ready",
+                            &mut log,
+                            &mut tutorial_banner,
+                        );
+
                         pending_fragment = Some(milestone.memory_fragment.clone());
                         pending_sacrifice_faction = Some(milestone.faction_id.clone());
                         pending_village = Some(milestone.zone_id.clone());
@@ -1666,39 +2228,72 @@ async fn main() {
                     }
                 }
             }
-            clear_background(Color::new(0.05, 0.05, 0.07, 1.0));
-            cam.update(player_pos);
-            tilemap.draw(&assets);
 
-            let player_sprite = assets.get("player");
-            draw_texture_ex(
-                player_sprite,
-                player_pos.x - 16.0,
-                player_pos.y - 16.0,
-                WHITE,
-                DrawTextureParams {
-                    dest_size: Some(vec2(32.0, 32.0)),
-                    flip_x: facing.x < 0.0,
-                    ..Default::default()
-                },
-            );
-
-            if let Some((text, _)) = &player_speech {
-                let bubble_w = text.len() as f32 * 8.0 + 24.0;
-                let bubble_h = 34.0;
-                let bx = player_pos.x - bubble_w / 2.0;
-                let by = player_pos.y - 55.0;
-
-                draw_rectangle(bx, by, bubble_w, bubble_h, Color::new(1.0, 1.0, 1.0, 0.9));
-                draw_rectangle_lines(bx, by, bubble_w, bubble_h, 2.0, BLACK);
-                draw_triangle(
-                    vec2(player_pos.x - 6.0, by + bubble_h),
-                    vec2(player_pos.x + 4.0, by + bubble_h),
-                    vec2(player_pos.x, by + bubble_h + 14.0),
-                    Color::new(1.0, 1.0, 1.0, 0.9),
-                );
-                draw_text(text, bx + 12.0, by + bubble_h / 2.0 + 6.0, 16.0, BLACK);
+            if is_key_pressed(KeyCode::F3) {
+                zone_debug = !zone_debug;
             }
+
+            clear_background(Color::new(0.05, 0.05, 0.07, 1.0));
+            let dt = get_frame_time();
+            if let Some(z) = zones.zones.get("incinerator") {
+                let lit = corpse
+                    .as_ref()
+                    .map_or(false, |c| c.state == CorpseState::Fueled);
+                let (ember_rate, smoke_rate) = if lit {
+                    (14.0, 8.0)
+                } else if burn_timer.is_some() {
+                    (0.0, 4.0)
+                } else {
+                    (0.0, 0.0)
+                };
+                let (zx, zy, zw, zh) = (z.position.0, z.position.1, z.size.0, z.size.1);
+
+                if rand::gen_range(0.0, 1.0) < ember_rate * dt {
+                    particles.push(Particle {
+                        pos: vec2(zx + rand::gen_range(0.2, 0.8) * zw, zy + zh * 0.5),
+                        vel: vec2(rand::gen_range(-8.0, 8.0), rand::gen_range(-50.0, -25.0)),
+                        age: 0.0,
+                        life: rand::gen_range(0.8, 1.6),
+                        smoke: false,
+                    });
+                }
+                if rand::gen_range(0.0, 1.0) < smoke_rate * dt {
+                    particles.push(Particle {
+                        pos: vec2(zx + rand::gen_range(0.3, 0.7) * zw, zy + zh * 0.3),
+                        vel: vec2(rand::gen_range(-4.0, 4.0), rand::gen_range(-22.0, -12.0)),
+                        age: 0.0,
+                        life: rand::gen_range(2.0, 3.5),
+                        smoke: true,
+                    });
+                }
+            } else {
+                particles.clear();
+            }
+            for p in &mut particles {
+                p.age += dt;
+                p.pos += p.vel * dt;
+                if p.smoke {
+                    p.vel.x += (p.age * 2.0).sin() * 10.0 * dt;
+                }
+            }
+            particles.retain(|p| p.age < p.life);
+
+            cam.follow(player_pos, get_frame_time());
+            tilemap.draw(&assets);
+            if zone_debug {
+                for s in &solids {
+                    draw_rectangle_lines(s.0, s.1, s.2, s.3, 2.0, RED);
+                }
+                draw_rectangle_lines(
+                    player_pos.x - 8.0,
+                    player_pos.y + 2.0,
+                    16.0,
+                    12.0,
+                    2.0,
+                    GREEN,
+                );
+            }
+            let mut labels: Vec<(String, Vec2, f32, Color)> = Vec::new();
 
             for zone in zones.zones.values() {
                 let is_village = zone.faction_id.is_some();
@@ -1709,33 +2304,116 @@ async fn main() {
                 } else {
                     true
                 };
+                let (zx, zy) = zone.position;
+                let (zw, zh) = zone.size;
 
                 if is_village && !discovered {
-                    let (zx, zy) = zone.position;
-                    let (zw, zh) = zone.size;
                     draw_rectangle(zx, zy, zw, zh, Color::new(0.1, 0.1, 0.1, 0.35));
                     draw_rectangle_lines(zx, zy, zw, zh, 20.0, GRAY);
-                    draw_text("???", zx + zw / 2.0 - 16.0, zy + zh / 2.0, 20.0, GRAY);
+                    labels.push((
+                        "???".to_string(),
+                        vec2(zx + zw / 2.0, zy + zh / 2.0),
+                        28.0,
+                        GRAY,
+                    ));
                     continue;
                 }
 
-                let (zx, zy) = zone.position;
-                let (zw, zh) = zone.size;
-                let color = match zone.id.as_str() {
-                    "morgue" => Color::new(0.3, 0.1, 0.4, 0.4),
-                    "workyard" => Color::new(0.4, 0.3, 0.1, 0.4),
-                    "cellar" => Color::new(0.1, 0.3, 0.2, 0.4),
-                    "burial_site" => Color::new(0.2, 0.35, 0.2, 0.4),
-                    "incinerator" => Color::new(0.5, 0.25, 0.05, 0.5),
-                    _ => match zone.faction_id.as_deref() {
-                        Some("village") => Color::new(0.1, 0.2, 0.5, 0.4),
-                        Some("cult") => Color::new(0.5, 0.1, 0.1, 0.4),
-                        _ => Color::new(0.2, 0.2, 0.2, 0.4),
+                if zone.id != "memorial" {
+                    draw_building(zone);
+                }
+
+                let near = rect_distance((player_pos.x, player_pos.y), (zx, zy, zw, zh));
+                let proximity = (1.0 - near / 160.0).clamp(0.0, 1.0);
+                let color = match zone.kind {
+                    ZoneKind::Home => Color::new(0.45, 0.3, 0.15, 0.5),
+                    ZoneKind::Store => Color::new(0.5, 0.45, 0.1, 0.5),
+                    ZoneKind::Grounds => Color::new(0.2, 0.4, 0.2, 0.4),
+                    ZoneKind::Station => match zone.id.as_str() {
+                        "morgue" => Color::new(0.3, 0.1, 0.4, 0.4),
+                        "workyard" => Color::new(0.4, 0.3, 0.1, 0.4),
+                        "cellar" => Color::new(0.1, 0.3, 0.2, 0.4),
+                        "burial_site" => Color::new(0.2, 0.35, 0.2, 0.4),
+                        "incinerator" => Color::new(0.5, 0.25, 0.05, 0.5),
+                        _ => match zone.faction_id.as_deref() {
+                            Some("village") => Color::new(0.1, 0.2, 0.5, 0.4),
+                            Some("cult") => Color::new(0.5, 0.1, 0.1, 0.4),
+                            _ => Color::new(0.2, 0.2, 0.2, 0.4),
+                        },
                     },
                 };
-                draw_rectangle(zx, zy, zw, zh, color);
-                draw_rectangle_lines(zx, zy, zw, zh, 2.0, PURPLE);
-                draw_text(&zone.name, zx + 8.0, zy + 20.0, 20.0, WHITE);
+
+                let fill_alpha = if zone_debug { color.a } else { color.a * 0.45 };
+                draw_rectangle(
+                    zx,
+                    zy,
+                    zw,
+                    zh,
+                    Color::new(color.r, color.g, color.b, fill_alpha),
+                );
+                if zone_debug {
+                    draw_rectangle_lines(zx, zy, zw, zh, 2.0, PURPLE);
+                } else if proximity > 0.0 {
+                    draw_rectangle_lines(
+                        zx,
+                        zy,
+                        zw,
+                        zh,
+                        2.0,
+                        Color::new(0.85, 0.70, 0.30, 0.6 * proximity),
+                    );
+                }
+                if zone_debug || proximity > 0.0 {
+                    let a = if zone_debug { 1.0 } else { proximity };
+                    labels.push((
+                        zone.name.clone(),
+                        vec2(zx + zw / 2.0, zy - 8.0),
+                        24.0,
+                        Color::new(1.0, 1.0, 1.0, a),
+                    ));
+                }
+
+                if zone.id == "incinerator" {
+                    let lit = corpse
+                        .as_ref()
+                        .map_or(false, |c| c.state == CorpseState::Fueled);
+                    let (label, color, fill) = if lit {
+                        ("LIT", ORANGE, 1.0)
+                    } else if let Some(t) = burn_timer {
+                        ("Lighting...", YELLOW, 1.0 - t / STOKE_SECS)
+                    } else {
+                        ("Cold", GRAY, 0.0)
+                    };
+                    labels.push((
+                        label.to_string(),
+                        vec2(zx + zw / 2.0, zy + zh / 2.0),
+                        22.0,
+                        color,
+                    ));
+                    draw_rectangle(
+                        zx + 8.0,
+                        zy + zh - 14.0,
+                        zw - 16.0,
+                        8.0,
+                        Color::new(0.1, 0.1, 0.1, 0.8),
+                    );
+                    draw_rectangle(zx + 8.0, zy + zh - 14.0, (zw - 16.0) * fill, 8.0, color);
+                    if lit {
+                        let flick = 0.5 + 0.5 * (get_time() as f32 * 9.0).sin();
+                        draw_rectangle(
+                            zx,
+                            zy,
+                            zw,
+                            zh,
+                            Color::new(1.0, 0.45, 0.1, 0.12 + 0.12 * flick),
+                        );
+                    }
+                }
+
+                if zone.id == "memorial" {
+                    draw_memorial(zone, get_time() as f32);
+                }
+
                 if zone.faction_id.is_some() {
                     draw_grave_markers(zone, 4);
                     let sacrificed = milestones
@@ -1750,11 +2428,16 @@ async fn main() {
                     let (ex, ey, ew, eh) = instance.exit_zone;
                     draw_rectangle(ex, ey, ew, eh, Color::new(0.2, 0.6, 0.2, 0.3));
                     draw_rectangle_lines(ex, ey, ew, eh, 2.0, GREEN);
-                    draw_text("Path home", ex + 8.0, ey + 20.0, 16.0, WHITE);
+                    labels.push((
+                        "Path home".to_string(),
+                        vec2(ex + ew / 2.0, ey - 8.0),
+                        20.0,
+                        WHITE,
+                    ));
                 }
             }
-
-            for n in &npcs {
+            let mut order: Vec<(f32, Who)> = vec![(player_pos.y, Who::Player)];
+            for (i, n) in npcs.iter().enumerate() {
                 let visible = match &n.zone_id {
                     Some(zid) => discoveries
                         .iter()
@@ -1763,81 +2446,126 @@ async fn main() {
                 };
 
                 if visible && n.is_active(&clock) {
-                    let tex = assets.get(&n.sprite_id);
-                    draw_texture_ex(
-                        tex,
-                        n.position.0 - 16.0,
-                        n.position.1 - 16.0,
-                        WHITE,
-                        DrawTextureParams {
-                            dest_size: Some(vec2(32.0, 32.0)),
-                            ..Default::default()
-                        },
-                    );
-                    draw_text(
-                        &n.name,
-                        n.position.0 - 30.0,
-                        n.position.1 - 20.0,
-                        18.0,
-                        WHITE,
-                    );
-                    if let Some(marker) =
-                        quest_marker(&n.id, &quest_defs, &quest_status, &player_inventory)
-                    {
-                        let (glyph, color) = match marker {
-                            QuestMarker::Available => ("!", GOLD),
-                            QuestMarker::Pending => ("?", GRAY),
-                            QuestMarker::Ready => ("?", GREEN),
-                        };
-                        let bob = if marker == QuestMarker::Ready {
-                            (get_time() as f32 * 4.0).sin() * 2.0
+                    order.push((n.position.1, Who::Npc(i)));
+                }
+            }
+
+            for (i, p) in props.iter().enumerate() {
+                if (p.pos.0 - player_pos.x).abs() < 900.0 && (p.pos.1 - player_pos.y).abs() < 700.0
+                {
+                    order.push((p.pos.1 - 14.0, Who::Prop(i)));
+                }
+            }
+            order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+            for (_, who) in order {
+                match who {
+                    Who::Player => {
+                        draw_ellipse(
+                            player_pos.x,
+                            player_pos.y + 14.0,
+                            11.0,
+                            4.0,
+                            0.0,
+                            Color::new(0.0, 0.0, 0.0, 0.3),
+                        );
+                        let moving = walk_t > 0.0;
+                        let bob = if moving {
+                            -walk_t.sin().abs() * 2.0 // player walking bounce
                         } else {
                             0.0
                         };
-                        draw_text(
-                            glyph,
-                            n.position.0 - 4.0,
-                            n.position.1 - 40.0 + bob,
-                            28.0,
-                            color,
+                        let sway = if moving { walk_t.sin() * 0.04 } else { 0.0 }; // player walking sway
+                        draw_texture_ex(
+                            assets.get("player"),
+                            player_pos.x - 16.0,
+                            player_pos.y - 16.0 + bob,
+                            WHITE,
+                            DrawTextureParams {
+                                dest_size: Some(vec2(32.0, 32.0)),
+                                flip_x: facing.x < 0.0,
+                                rotation: sway,
+                                ..Default::default()
+                            },
                         );
+                    }
+                    Who::Prop(i) => draw_prop(&props[i]),
+                    Who::Npc(i) => {
+                        let n = &npcs[i];
+                        draw_ellipse(
+                            n.position.0,
+                            n.position.1 + 14.0,
+                            11.0,
+                            4.,
+                            0.0,
+                            Color::new(0.0, 0.0, 0.0, 0.3),
+                        );
+                        draw_texture_ex(
+                            assets.get(&n.sprite_id),
+                            n.position.0 - 16.0,
+                            n.position.1 - 16.0,
+                            WHITE,
+                            DrawTextureParams {
+                                dest_size: Some(vec2(32.0, 32.0)),
+                                ..Default::default()
+                            },
+                        );
+                        labels.push((
+                            n.name.clone(),
+                            vec2(n.position.0, n.position.1 - 22.0),
+                            20.0,
+                            WHITE,
+                        ));
+                        if let Some(marker) =
+                            quest_marker(&n.id, &quest_defs, &quest_status, &player_inventory)
+                        {
+                            let (glyph, color) = match marker {
+                                QuestMarker::Available => ("!", GOLD),
+                                QuestMarker::Pending => ("?", GRAY),
+                                QuestMarker::Ready => ("?", GREEN),
+                            };
+                            let bob = if marker == QuestMarker::Ready {
+                                (get_time() as f32 * 4.0).sin() * 2.0
+                            } else {
+                                0.0
+                            };
+                            labels.push((
+                                glyph.to_string(),
+                                vec2(n.position.0, n.position.1 - 30.0 + bob),
+                                36.0,
+                                color,
+                            ));
+                        }
                     }
                 }
             }
 
-            if let (Some((text, pos, _)), false) =
-                (&npc_speech, matches!(active_window, ActiveWindow::Dialogue))
-            {
-                let max_width = 260.0;
-                let lines = wrap_text(text, 16.0, max_width - 20.0);
-                let bubble_w = max_width;
-                let bubble_h = 20.0 + lines.len() as f32 * 20.0;
-                let bx = pos.0 - bubble_w / 2.0;
-                let by = pos.1 - 20.0 - bubble_h;
-
-                draw_rectangle(bx, by, bubble_w, bubble_h, Color::new(1.0, 1.0, 1.0, 0.85));
-                draw_rectangle_lines(bx, by, bubble_w, bubble_h, 2.0, BLACK);
-
-                let mut ty = by + 20.0;
-                for line in &lines {
-                    draw_text(line, bx + 10.0, ty, 16.0, BLACK);
-                    ty += 20.0;
+            for zone in zones.zones.values() {
+                if zone.door.is_some() {
+                    let r = (zone.position.0, zone.position.1, zone.size.0, zone.size.1);
+                    let d = rect_distance((player_pos.x, player_pos.y), r);
+                    draw_roof(zone, (d / 48.0).clamp(0.0, 1.0));
                 }
             }
 
-            if edit_mode {
-                draw_text(
-                    &format!(
-                    "MAP EDIT - tile {}([ grass, ] path, LMB paint, RMB erase, F6 save, F2 exit",
-                    edit_tile_id
-                ),
-                    10.0,
-                    screen_height() - 90.0,
-                    18.0,
-                    YELLOW,
-                );
+            for p in &particles {
+                let t = p.age / p.life;
+                if p.smoke {
+                    draw_circle(
+                        p.pos.x,
+                        p.pos.y,
+                        5.0 + 10.0 * t,
+                        Color::new(0.35, 0.35, 0.38, 0.35 * (1.0 - t)),
+                    );
+                } else {
+                    draw_circle(
+                        p.pos.x,
+                        p.pos.y,
+                        2.0 - t,
+                        Color::new(1.0, 0.7 - 0.4 * t, 0.15, 1.0 - t),
+                    );
+                }
             }
-
             set_default_camera();
             let daylight = (1.0 - (clock.time_of_day * std::f32::consts::TAU).cos()) / 2.0;
             let gloom = 0.15 + 0.70 * (1.0 - daylight);
@@ -1864,7 +2592,117 @@ async fn main() {
             draw_rectangle(0.0, y1, sw, (sh - y1).max(0.0), dark); // bottom
             draw_rectangle(0.0, y0, x0.max(0.0), r * 2.0, dark); // left
             draw_rectangle(x1, y0, (sw - x1).max(0.0), r * 2.0, dark); // right
+            draw_texture_ex(
+                &vignette_tex,
+                0.0,
+                0.0,
+                WHITE,
+                DrawTextureParams {
+                    dest_size: Some(vec2(sw, sh)),
+                    ..Default::default()
+                },
+            );
 
+            for (text, pos, size, color) in &labels {
+                let s = cam.camera.world_to_screen(*pos);
+                let d = ui.measure(text, *size);
+                let x = s.x - d.width / 2.0;
+                ui.text(
+                    text,
+                    x + 1.0,
+                    s.y + 1.0,
+                    *size,
+                    Color::new(0.0, 0.0, 0.0, 0.7 * color.a),
+                );
+                ui.text(text, x, s.y, *size, *color);
+            }
+            if let Some((text, _)) = &player_speech {
+                let a = cam
+                    .camera
+                    .world_to_screen(vec2(player_pos.x, player_pos.y - 22.0));
+                ui.bubble(text, (a.x, a.y));
+            }
+            if let (Some((text, pos, _)), false) =
+                (&npc_speech, matches!(active_window, ActiveWindow::Dialogue))
+            {
+                let a = cam.camera.world_to_screen(vec2(pos.0, pos.1 - 34.0));
+                ui.bubble(text, (a.x, a.y));
+            }
+
+            let prompt: Option<String> = if ui_open || active_action.is_some() {
+                None
+            } else if let Some(npc) = closest_npc_in_range(&npcs, interaction_point, INTERACT_REACH)
+                .filter(|n| n.is_active(&clock))
+            {
+                Some(format!("[E] Talk to {}", npc.name))
+            } else if matches!(current_map, MapId::Hub)
+                && village_zone_contains(&zones, interaction_point).map_or(false, |z| {
+                    discoveries
+                        .iter()
+                        .any(|d| d.zone_id == z.id && discovered_zones.contains(&d.id))
+                })
+            {
+                Some("[E] Enter village".to_string())
+            } else {
+                match corpse.as_ref().map(|c| c.state) {
+                    Some(CorpseState::Delivered)
+                        if zones
+                            .zones
+                            .get("morgue")
+                            .map_or(false, |z| z.contains(here)) =>
+                    {
+                        Some("Hold [F] to examine".to_string())
+                    }
+                    Some(CorpseState::Autopsied) if at_burial => {
+                        Some(if selected_tool == Some(1) {
+                            "Hold [F] to dig".to_string()
+                        } else {
+                            "Select the Shovel [2] to dig".to_string()
+                        })
+                    }
+                    Some(CorpseState::Autopsied) if at_incinerator && burn_timer.is_none() => {
+                        Some("[F] Light the fire".to_string())
+                    }
+                    Some(CorpseState::GraveDug) if at_burial => Some("[SPACE] Bury".to_string()),
+                    Some(CorpseState::Fueled) if at_incinerator => Some("[SPACE] Burn".to_string()),
+                    _ if zones.zones.values().any(|z| {
+                        z.contains(interaction_point) && z.storage.values().any(|s| s.count > 0)
+                    }) =>
+                    {
+                        Some("[E] Take supplies".to_string())
+                    }
+                    _ if player_in_cellar => Some("[C] Read the markers".to_string()),
+                    _ => None,
+                }
+            };
+            if let Some(text) = prompt {
+                let a = cam
+                    .camera
+                    .world_to_screen(vec2(player_pos.x, player_pos.y + 30.0));
+                ui.prompt(&text, (a.x, a.y));
+            }
+            for f in &mut floaters {
+                f.age += get_frame_time();
+            }
+            floaters.retain(|f| f.age < 1.6);
+            for f in &floaters {
+                let s = cam.camera.world_to_screen(f.pos + vec2(0.0, -f.age * 28.0));
+                let a = 1.0 - f.age / 1.6;
+                ui.text(
+                    &f.text,
+                    s.x + 1.0,
+                    s.y + 1.0,
+                    26.0,
+                    Color::new(0.0, 0.0, 0.0, 0.7 * a),
+                );
+                ui.text(
+                    &f.text,
+                    s.x,
+                    s.y,
+                    26.0,
+                    Color::new(f.color.r, f.color.g, f.color.b, a),
+                );
+            }
             if let Some(a) = &active_action {
                 draw_progress_bar(a.progress(), a.label());
             }
@@ -1881,7 +2719,7 @@ async fn main() {
 
                 let mut ty = py + 30.0;
                 for line in &lines {
-                    draw_text(line, px + 20.0, ty, 20.0, WHITE);
+                    ui.text(line, px + 20.0, ty, 20.0, WHITE);
                     ty += 26.0;
                 }
             }
@@ -1904,24 +2742,21 @@ async fn main() {
                 let rows = (carried_ids.len() as f32 / cols as f32).ceil().max(1.0) as usize;
 
                 let panel_w = cols as f32 * box_w + (cols as f32 + 1.0) * gap;
-                let panel_h = rows as f32 * box_h + (rows as f32 + 1.0) * gap + 90.0;
+                let panel_h = rows as f32 * box_h + (rows as f32 + 1.0) * gap + 160.0;
                 let px = (screen_width() - panel_w) - 2.0;
                 let py = (screen_height() - panel_h) / 2.0;
 
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.1, 0.1, 0.15, 0.95));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, WHITE);
-                draw_text(
-                    "Inventory - select up to 4  for your rite",
-                    px + 20.0,
-                    py + 30.0,
-                    22.0,
-                    WHITE,
+                ui.panel(
+                    (px, py, panel_w, panel_h),
+                    Some("Inventory - up to 4 per ride"),
+                    theme::ACCENT_GOLD,
                 );
+
                 let clicked = is_mouse_button_pressed(MouseButton::Left);
                 let mouse = mouse_position();
 
                 if carried_ids.is_empty() {
-                    draw_text("Nothing carried yet.", px + 20.0, py + 70.0, 16.0, GRAY);
+                    ui.text("Nothing carried yet.", px + 20.0, py + 70.0, 16.0, GRAY);
                 }
 
                 for (i, id) in carried_ids.iter().enumerate() {
@@ -1956,23 +2791,34 @@ async fn main() {
                         Color::new(0.15, 0.15, 0.15, 0.68)
                     };
                     draw_rectangle(bx, by, box_w, box_h, bg);
+
+                    let wants = corpse.as_ref().and_then(|c| c.requested_tag.as_ref());
+                    let matches_req =
+                        reagent.map_or(false, |r| wants.map_or(false, |t| r.tags.contains(t)));
+
                     draw_rectangle_lines(
                         bx,
                         by,
                         box_w,
                         box_h,
                         2.0,
-                        if active { GREEN } else { WHITE },
+                        if active {
+                            GREEN
+                        } else if matches_req {
+                            GOLD
+                        } else {
+                            WHITE
+                        },
                     );
                     if let Some(r) = reagent {
                         let lines = wrap_text(&r.name, 14.0, box_w - 12.0);
                         let mut ty = by + 20.0;
                         for line in &lines {
-                            draw_text(line, bx + 6.0, ty, 14.0, WHITE);
+                            ui.text(line, bx + 6.0, ty, 14.0, WHITE);
                             ty += 16.0;
                         }
                     }
-                    draw_text(
+                    ui.text(
                         &format!("x{}    sel{}", count, picked),
                         bx + 6.0,
                         by + box_h - 10.0,
@@ -1980,14 +2826,48 @@ async fn main() {
                         SKYBLUE,
                     );
                 }
-                draw_text(
+                let modes: Vec<(&str, RiteDisposal)> = match corpse.as_ref().map(|c| c.state) {
+                    Some(CorpseState::GraveDug) => vec![("buried", RiteDisposal::Burial)],
+                    Some(CorpseState::Fueled) => vec![("burned", RiteDisposal::Burning)],
+                    _ => vec![
+                        ("buried", RiteDisposal::Burial),
+                        ("burned", RiteDisposal::Burning),
+                    ],
+                };
+                let mut ly = py + 55.0 + rows as f32 * (box_h + gap) + 22.0;
+                for (name, disposal) in modes {
+                    ui.text(&format!("If {name}:"), px + 20.0, ly, 18.0, theme::TEXT_DIM);
+                    let mut x = px + 110.0;
+                    for (def, delta) in
+                        preview_rite(&selected_reagents, &reagent_defs, &faction_defs, disposal)
+                    {
+                        let t = format!("{} {:+.1}", def.name, delta);
+                        ui.text(&t, x, ly, 18.0, faction_color(&def.id));
+                        x += ui.measure(&t, 18.0).width + 18.0;
+                    }
+                    ly += 22.0;
+                }
+
+                if let Some(tag) = corpse.as_ref().and_then(|c| c.requested_tag.as_ref()) {
+                    let met =
+                        resolve_rite(&selected_reagent_list(&selected_reagents, &reagent_defs))
+                            .tags
+                            .contains_key(tag);
+                    let (txt, col) = if met {
+                        ("met", GREEN)
+                    } else {
+                        ("not met", theme::TEXT_DIM)
+                    };
+                    ui.text(&format!("Request ({tag}): {txt}"), px + 20.0, ly, 18.0, col);
+                }
+                ui.text(
                     &format!("Selected: {}/4", selected_reagents.len()),
                     px + 20.0,
                     py + panel_h - 20.0,
                     16.0,
                     GRAY,
                 );
-                draw_text(
+                ui.text(
                     "[I] to close",
                     px + panel_w - 100.0,
                     py + panel_h - 20.0,
@@ -2001,16 +2881,15 @@ async fn main() {
                 let panel_h = 360.0;
                 let px = (screen_width() - panel_w) / 2.0;
                 let py = (screen_height() - panel_h) / 2.0;
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.1, 0.1, 0.15, 0.95));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, WHITE);
-                draw_text("Cellar Records", px + 20.0, py + 30.0, 24.0, WHITE);
-
+                let rect = (px, py, panel_w, panel_h);
+                ui.dim_world();
+                ui.panel(rect, Some("Cellar Records"), theme::ACCENT_GOLD);
                 let mut cy = py + 60.0;
                 for record in &cellar_records {
-                    draw_text(&record.name, px + 20.0, cy, 18.0, WHITE);
-                    draw_text(&record.years, px + 20.0, cy + 18.0, 14.0, GRAY);
-                    draw_text(&record.epitaph, px + 20.0, cy + 36.0, 14.0, LIGHTGRAY);
-                    draw_text(
+                    ui.text(&record.name, px + 20.0, cy, 18.0, WHITE);
+                    ui.text(&record.years, px + 20.0, cy + 18.0, 14.0, GRAY);
+                    ui.text(&record.epitaph, px + 20.0, cy + 36.0, 14.0, LIGHTGRAY);
+                    ui.text(
                         &format!(
                             "Sacrificed to: {} ({})",
                             record.sacrificed_to, record.village
@@ -2024,17 +2903,19 @@ async fn main() {
                 }
                 if !memory_fragments.is_empty() {
                     cy += 10.0;
-                    draw_text("What you remember:", px + 20.0, cy, 18.0, GOLD);
+                    ui.text("What you remember:", px + 20.0, cy, 18.0, GOLD);
                     cy += 24.0;
                     for fragment in &memory_fragments {
-                        draw_text(fragment, px + 20.0, cy, 14.0, LIGHTGRAY);
+                        ui.text(fragment, px + 20.0, cy, 14.0, LIGHTGRAY);
                         cy += 20.0;
                     }
                 }
-                draw_text("[C] to close", px + 20.0, py + panel_h - 20.0, 16.0, GRAY);
+                ui.text("[C] to close", px + 20.0, py + panel_h - 20.0, 16.0, GRAY);
             }
 
-            if is_key_pressed(KeyCode::R) {
+            if is_key_pressed(KeyCode::R)
+                && matches!(active_window, ActiveWindow::None | ActiveWindow::Sacrifice)
+            {
                 if player_in_cellar && sacrifice_available {
                     sacrifice_selection.clear();
                     active_window = match active_window {
@@ -2049,6 +2930,7 @@ async fn main() {
             // Theme picker
             if chosen_themes.len() as u32 == pair_index
                 && pair_index < 4
+                && sacrifice_fade.is_none()
                 && matches!(active_window, ActiveWindow::None)
             {
                 active_window = ActiveWindow::ThemePicker;
@@ -2061,44 +2943,27 @@ async fn main() {
                     .collect();
 
                 let panel_w = 420.0;
-                let panel_h = 100.0 + remaining.len() as f32 * 50.0;
+                let panel_h = 110.0 + remaining.len() as f32 * 50.0;
                 let px = (screen_width() - panel_w) / 2.0;
                 let py = (screen_height() - panel_h) / 2.0;
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.1, 0.1, 0.15, 0.97));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, GOLD);
-                draw_text(
-                    "Where does the next road lead?",
+                ui.dim_world();
+                ui.panel(
+                    (px, py, panel_w, panel_h),
+                    Some("The Next Road"),
+                    theme::ACCENT_GOLD,
+                );
+                ui.text(
+                    "Each theme is two lives: its village and its cult mirror.",
                     px + 20.0,
-                    py + 32.0,
-                    24.0,
-                    WHITE,
+                    py + 66.0,
+                    14.0,
+                    theme::TEXT_DIM,
                 );
 
-                let mut ry = py + 60.0;
+                let mut ry = py + 84.0;
                 for name in &remaining {
                     let rect = (px + 20.0, ry, panel_w - 40.0, 40.0);
-                    let hover = point_in_rect(mouse_position(), rect);
-                    draw_rectangle(
-                        rect.0,
-                        rect.1,
-                        rect.2,
-                        rect.3,
-                        if hover {
-                            Color::new(0.2, 0.5, 0.2, 0.85)
-                        } else {
-                            Color::new(0.15, 0.15, 0.15, 0.68)
-                        },
-                    );
-                    draw_rectangle_lines(rect.0, rect.1, rect.2, rect.3, 2.0, WHITE);
-                    draw_text(
-                        &name.to_uppercase(),
-                        rect.0 + 12.0,
-                        rect.1 + 27.0,
-                        22.0,
-                        WHITE,
-                    );
-
-                    if hover && is_mouse_button_pressed(MouseButton::Left) {
+                    if ui.button(rect, &name.to_uppercase(), true) {
                         chosen_themes.push(name.to_string());
                         log.push(format!("You turn towards {}.", name));
                         active_window = ActiveWindow::None;
@@ -2109,22 +2974,35 @@ async fn main() {
             // Sacrifice
             if let ActiveWindow::Sacrifice = active_window {
                 let panel_w = 460.0;
+                let slots = carry_slots(bound_this_life);
                 let sacrifice_ids: Vec<&String> = reagent_order
                     .iter()
                     .filter(|id| player_inventory.get(*id).copied().unwrap_or(0) > 0)
                     .collect();
-                let panel_h = 140.0 + sacrifice_ids.len() as f32 * 44.0;
+                let panel_h = 160.0 + sacrifice_ids.len() as f32 * 44.0;
                 let px = (screen_width() - panel_w) / 2.0;
                 let py = (screen_height() - panel_h) / 2.0;
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.12, 0.05, 0.08, 0.97));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, RED);
-                draw_text("The Ritual", px + 20.0, py + 30.0, 24.0, WHITE);
-                draw_text(
-                    "Choose up to 5 items to carry into your next life.",
+                ui.dim_world();
+                ui.panel(
+                    (px, py, panel_w, panel_h),
+                    Some("The Ritual"),
+                    theme::ACCENT_RED,
+                );
+                ui.text(
+                    &format!("Choose up to {slots} items to carry into your next life."),
                     px + 20.0,
-                    py + 52.0,
+                    py + 70.0,
                     16.0,
                     LIGHTGRAY,
+                );
+                ui.text(
+                    &format!(
+                        "Bound rites this life: {bound_this_life} (+1 slot per {BOUND_PER_SLOT}, max +{MAX_BONUS_SLOTS})"
+                    ),
+                    px + 20.0,
+                    py + 86.0,
+                    14.0,
+                    GRAY,
                 );
 
                 let selected_total: u32 = sacrifice_selection.values().sum();
@@ -2138,7 +3016,7 @@ async fn main() {
                     if is_mouse_button_pressed(MouseButton::Left)
                         && point_in_rect(mouse_position(), row_rect)
                         && chosen < owned
-                        && selected_total < 5
+                        && selected_total < slots
                     {
                         *sacrifice_selection.entry(reagent.id.clone()).or_insert(0) += 1;
                     }
@@ -2150,7 +3028,7 @@ async fn main() {
                     }
 
                     draw_rectangle_lines(row_rect.0, row_rect.1, row_rect.2, row_rect.3, 1.0, GRAY);
-                    draw_text(
+                    ui.text(
                         &format!("{} - carrying {} - taking {}", reagent.name, owned, chosen),
                         px + 28.0,
                         ry + 24.0,
@@ -2159,17 +3037,17 @@ async fn main() {
                     );
                     ry += 44.0;
                 }
-                draw_text(
+                ui.text(
                     &format!(
-                        "Selected: {}/5  (left-click a row to add, right-click to remove)",
-                        selected_total
+                        "Selected: {}/{}  (left-click a row to add, right-click to remove)",
+                        selected_total, slots
                     ),
                     px + 20.0,
                     ry + 10.0,
                     14.0,
                     GRAY,
                 );
-                draw_text(
+                ui.text(
                     "[ENTER] confirm the ritual   [R] cancel",
                     px + 20.0,
                     py + panel_h - 20.0,
@@ -2233,10 +3111,12 @@ async fn main() {
                     }
 
                     selected_reagents.clear();
+                    floaters.clear();
                     player_inventory.clear();
                     corpse = None;
                     burn_timer = None;
                     last_tended.clear();
+                    bound_this_life = 0;
                     active_action = None;
                     keeper_number += 1;
                     if is_cult_life {
@@ -2251,6 +3131,12 @@ async fn main() {
                     sacrifice_available = false;
                     sacrifice_selection.clear();
                     active_window = ActiveWindow::None;
+                    let respawn = zones
+                        .zones
+                        .get("keeper_shack")
+                        .map(|z| vec2(z.position.0 + z.size.0 / 2.0, z.position.1 + z.size.1 / 2.0))
+                        .unwrap_or(vec2(0.0, 150.0));
+                    sacrifice_fade = Some((0.0, respawn, false));
                 }
             }
 
@@ -2271,12 +3157,16 @@ async fn main() {
                 let panel_h = 280.0;
                 let px = (screen_width() - panel_w) / 2.0;
                 let py = (screen_height() - panel_h) / 2.0 - 60.0;
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.1, 0.1, 0.15, 0.95));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, WHITE);
+                let title = npc_info.as_ref().map(|(n, _, _)| n.clone());
+                ui.dim_world();
+                ui.panel(
+                    (px, py, panel_w, panel_h),
+                    title.as_deref(),
+                    theme::ACCENT_GOLD,
+                );
+
                 match (npc_info, current) {
                     (Some((name, faction, npc_pos)), Some(q)) => {
-                        draw_text(&name, px + 20.0, py + 30.0, 24.0, WHITE);
-
                         let st = quest_status.get(&q.id).map(|(s, _)| s);
                         let fresh = st.is_none();
                         let accepted = matches!(st, Some(QuestStatus::Accepted));
@@ -2298,12 +3188,12 @@ async fn main() {
 
                         let mut ty = py + 62.0;
                         for line in wrap_text(body, 18.0, panel_w - 40.0) {
-                            draw_text(&line, px + 20.0, ty, 18.0, LIGHTGRAY);
+                            ui.text(&line, px + 20.0, ty, 18.0, LIGHTGRAY);
                             ty += 22.0;
                         }
 
                         ty += 10.0;
-                        draw_text(
+                        ui.text(
                             &quest_objective(q, &player_inventory, &reagent_defs),
                             px + 20.0,
                             ty,
@@ -2312,7 +3202,7 @@ async fn main() {
                         );
                         if fresh || can_turn_in {
                             ty += 22.0;
-                            draw_text(
+                            ui.text(
                                 &quest_reward_text(q, &reagent_defs),
                                 px + 20.0,
                                 ty,
@@ -2323,19 +3213,8 @@ async fn main() {
 
                         if let Some(label) = label {
                             let btn = (px + 20.0, py + panel_h - 60.0, 120.0, 36.0);
-                            draw_rectangle(
-                                btn.0,
-                                btn.1,
-                                btn.2,
-                                btn.3,
-                                Color::new(0.2, 0.5, 0.2, 0.85),
-                            );
-                            draw_rectangle_lines(btn.0, btn.1, btn.2, btn.3, 2.0, GREEN);
-                            draw_text(label, btn.0 + 14.0, btn.1 + 24.0, 20.0, WHITE);
-
-                            let pressed = is_key_pressed(KeyCode::Enter)
-                                || (is_mouse_button_pressed(MouseButton::Left)
-                                    && point_in_rect(mouse_position(), btn));
+                            let clicked_btn = ui.button(btn, label, true);
+                            let pressed = is_key_pressed(KeyCode::Enter) || clicked_btn;
                             if pressed {
                                 if fresh {
                                     quest_status.insert(
@@ -2349,12 +3228,28 @@ async fn main() {
                                         }
                                     }
                                     economy.stipend += q.reward_stipend;
+                                    if q.reward_stipend > 0.0 {
+                                        float(
+                                            &mut floaters,
+                                            format!("+{:.0} stipend", q.reward_stipend),
+                                            player_pos,
+                                            GOLD,
+                                            0,
+                                        );
+                                    }
                                     if q.reward_rep != 0.0 {
                                         *economy
                                             .faction_state
                                             .reputation
                                             .entry(faction.clone())
                                             .or_insert(0.0) += q.reward_rep;
+                                        float(
+                                            &mut floaters,
+                                            format!("{:+.1} {}", q.reward_rep, faction),
+                                            player_pos,
+                                            faction_color(&faction),
+                                            1,
+                                        );
                                     }
                                     if let Some((item_id, count)) = &q.reward_item {
                                         *player_inventory.entry(item_id.clone()).or_insert(0) +=
@@ -2383,21 +3278,20 @@ async fn main() {
                             }
                         }
                     }
-                    (Some((name, _, _)), None) => {
-                        draw_text(&name, px + 20.0, py + 30.0, 24.0, WHITE);
+                    (Some(_), None) => {
                         let msg = match next_quest_in_days(
                             npc_dialogue.as_deref().unwrap_or(""),
                             &quest_defs,
                             &quest_status,
                             clock.day_index,
                         ) {
-                            Some(d) => format!("Nothing for now. Come bak in {d} day(s)."),
+                            Some(d) => format!("Nothing for now. Come back in {d} day(s)."),
                             None => "Nothing more to say.".to_string(),
                         };
-                        draw_text(&msg, px + 20.0, py + 62.0, 18.0, LIGHTGRAY);
+                        ui.text(&msg, px + 20.0, py + 62.0, 18.0, LIGHTGRAY);
                     }
                     _ => {
-                        draw_text(
+                        ui.text(
                             "Nothing more to say.",
                             px + 20.0,
                             py + 62.0,
@@ -2413,10 +3307,14 @@ async fn main() {
                 let panel_h = screen_height() * 0.85;
                 let px = (screen_width() - panel_w) / 2.0;
                 let py = (screen_height() - panel_h) / 2.0;
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.1, 0.1, 0.15, 0.95));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, WHITE);
-                draw_text("Game Map (placeholder)", px + 20.0, py + 30.0, 24.0, WHITE);
-                draw_text("[M] to close", px + 20.0, py + panel_h - 20.0, 16.0, GRAY);
+
+                ui.dim_world();
+                ui.panel(
+                    (px, py, panel_w, panel_h),
+                    Some("Map (placeholder)"),
+                    theme::ACCENT_GOLD,
+                );
+                ui.text("[M] to close", px + 20.0, py + panel_h - 20.0, 16.0, GRAY);
             }
 
             if let ActiveWindow::QuestLog = active_window {
@@ -2424,12 +3322,16 @@ async fn main() {
                 let panel_h = 440.0;
                 let px = (screen_width() - panel_w) / 2.0;
                 let py = (screen_height() - panel_h) / 2.0;
-                draw_rectangle(px, py, panel_w, panel_h, Color::new(0.1, 0.1, 0.15, 0.95));
-                draw_rectangle_lines(px, py, panel_w, panel_h, 2.0, WHITE);
-                draw_text("Quest Log", px + 20.0, py + 30.0, 24.0, WHITE);
 
+                ui.dim_world();
+                ui.panel(
+                    (px, py, panel_w, panel_h),
+                    Some("Quest Log"),
+                    theme::ACCENT_GOLD,
+                );
                 let mut cy = py + 64.0;
                 let mut shown = 0;
+
                 for q in &quest_defs {
                     let Some((status, _)) = quest_status.get(&q.id) else {
                         continue;
@@ -2454,9 +3356,9 @@ async fn main() {
                         .map(|s| s.as_str())
                         .unwrap_or("Unknown");
 
-                    draw_text(who, px + 20.0, cy, 18.0, WHITE);
-                    draw_text(label, px + panel_w - 170.0, cy, 16.0, color);
-                    draw_text(
+                    ui.text(who, px + 20.0, cy, 18.0, WHITE);
+                    ui.text(label, px + panel_w - 170.0, cy, 16.0, color);
+                    ui.text(
                         &quest_objective(q, &player_inventory, &reagent_defs),
                         px + 20.0,
                         cy + 20.0,
@@ -2470,7 +3372,7 @@ async fn main() {
                     }
                 }
                 if shown == 0 {
-                    draw_text(
+                    ui.text(
                         "No active quests. Talk to someone marked with !",
                         px + 20.0,
                         py + 70.0,
@@ -2493,16 +3395,16 @@ async fn main() {
                     .collect();
                 cooling.sort_by_key(|(_, d)| *d);
                 if !cooling.is_empty() {
-                    draw_text(
+                    ui.text(
                         "Available again soon:",
                         px + 20.0,
                         py + panel_h - 88.0,
                         16.0,
                         GOLD,
                     );
-                    let mut ry = py + panel_h - 68.0;
+                    let mut ry = py + 104.0;
                     for (who, d) in cooling.iter().take(3) {
-                        draw_text(
+                        ui.text(
                             &format!("{who}: {d} day(s)"),
                             px + 28.0,
                             ry,
@@ -2512,7 +3414,7 @@ async fn main() {
                         ry += 18.0;
                     }
                 }
-                draw_text(
+                ui.text(
                     "[Q] to close",
                     px + panel_w - 110.0,
                     py + panel_h - 14.0,
@@ -2530,7 +3432,7 @@ async fn main() {
             );
             let hour = (clock.time_of_day * 24.0) as u32;
             let minute = ((clock.time_of_day * 24.0 * 60.0) as u32) % 60;
-            draw_text(
+            ui.text(
                 &format!(
                     "Day {} - {}    {:02}:{:02}    stipend: {:.1}     [F5 save / F9 load]",
                     clock.day_index + 1,
@@ -2549,7 +3451,7 @@ async fn main() {
             draw_rectangle(10.0, 46.0, 300.0, 70.0, Color::new(0.0, 0.0, 0.0, 0.5));
             let mut y = 68.0;
             if let Some(c) = corpse.as_ref() {
-                draw_text(
+                ui.text(
                     &format!("Corpse #{} quality {:.2}", c.id, c.current_quality()),
                     20.0,
                     y,
@@ -2558,7 +3460,7 @@ async fn main() {
                 );
                 y += 22.0;
                 if let Some(tag) = &c.requested_tag {
-                    draw_text(&format!("Requests: {tag}"), 20.0, y, 16.0, GOLD);
+                    ui.text(&format!("Requests: {tag}"), 20.0, y, 16.0, GOLD);
                     y += 22.0;
                 }
                 let hint = match c.state {
@@ -2568,19 +3470,19 @@ async fn main() {
                     CorpseState::Fueled => "At the fire: [SPACE] burn",
                     _ => "",
                 };
-                draw_text(hint, 20.0, y, 18.0, GRAY);
+                ui.text(hint, 20.0, y, 18.0, GRAY);
             } else {
-                draw_text("No corpse - awaiting delivery.", 20.0, y, 20.0, LIGHTGRAY);
+                ui.text("No corpse - awaiting delivery.", 20.0, y, 20.0, LIGHTGRAY);
             }
 
             if player_in_cellar {
                 y += 22.0;
-                draw_text("[C] Read the markers", 20.0, y, 18.0, GRAY);
+                ui.text("[C] Read the markers", 20.0, y, 18.0, GRAY);
             }
 
             if player_in_cellar && sacrifice_available {
                 y += 22.0;
-                draw_text("[R] The ritual calls to you...", 20.0, y, 18.0, RED);
+                ui.text("[R] The ritual calls to you...", 20.0, y, 18.0, RED);
             }
             if let Some(task) = tend_tasks.iter().find(|t| {
                 zones
@@ -2591,9 +3493,9 @@ async fn main() {
             }) {
                 y += 20.0;
                 if last_tended.get(&task.zone_id) == Some(&clock.day_index) {
-                    draw_text("Already tended today.", 20.0, y, 18.0, GRAY);
+                    ui.text("Already tended today.", 20.0, y, 18.0, GRAY);
                 } else {
-                    draw_text("[T] Tend this place", 20.0, y, 18.0, GOLD);
+                    ui.text("[T] Tend this place", 20.0, y, 18.0, GOLD);
                 }
             }
 
@@ -2620,7 +3522,7 @@ async fn main() {
                 let salt_count = zones.get_mut("morgue").quantity_of("salt");
                 let candle_count = zones.get_mut("morgue").quantity_of("candle");
                 let mut y = 146.0;
-                draw_text(
+                ui.text(
                     &format!("Morgue: {} salt, {} candle(s)", salt_count, candle_count),
                     20.0,
                     y,
@@ -2631,7 +3533,7 @@ async fn main() {
                 y += 22.0;
                 let carried_salt = player_inventory.get("salt").copied().unwrap_or(0);
                 let carried_candle = player_inventory.get("candle").copied().unwrap_or(0);
-                draw_text(
+                ui.text(
                     &format!(
                         "carrying: {} salt | {} candle(s)",
                         carried_salt, carried_candle
@@ -2645,7 +3547,7 @@ async fn main() {
                 y += 22.0;
                 let carried_dirt = player_inventory.get("grave_dirt").copied().unwrap_or(0);
                 let carried_nail = player_inventory.get("iron_nail").copied().unwrap_or(0);
-                draw_text(
+                ui.text(
                     &format!("carrying: {} dirt | {} nail(s)", carried_dirt, carried_nail),
                     20.0,
                     y,
@@ -2671,7 +3573,7 @@ async fn main() {
                     .get(&def.id)
                     .copied()
                     .unwrap_or(0.0);
-                draw_text(
+                ui.text(
                     &format!("{}: {:+.1}", def.name, rep),
                     20.0,
                     y,
@@ -2704,7 +3606,7 @@ async fn main() {
             );
             let mut y = log_y0 + 20.0;
             for line in &wrapped {
-                draw_text(line, 20.0, y, 16.0, GREEN);
+                ui.text(line, 20.0, y, 16.0, GREEN);
                 y += 20.0;
             }
 
@@ -2740,6 +3642,7 @@ async fn main() {
                     Color::new(0.15, 0.15, 0.15, 0.68)
                 };
                 draw_rectangle(sx, use_bar_y, use_w, use_h, bg);
+
                 draw_rectangle_lines(
                     sx,
                     use_bar_y,
@@ -2748,8 +3651,8 @@ async fn main() {
                     2.0,
                     if active { GREEN } else { WHITE },
                 );
-                draw_text(slot.label, sx + 8.0, use_bar_y + 30.0, 16.0, WHITE);
-                draw_text(
+                ui.text(slot.label, sx + 8.0, use_bar_y + 30.0, 16.0, WHITE);
+                ui.text(
                     &format!("[{}]", slot.hint),
                     sx + 8.0,
                     use_bar_y + 50.0,
@@ -2810,7 +3713,7 @@ async fn main() {
                 draw_rectangle_lines(sx, reagent_bar_y, reagent_w, reagent_h, 1.5, WHITE);
 
                 if picked > 0 {
-                    draw_text(
+                    ui.text(
                         &picked.to_string(),
                         sx + reagent_w - 12.0,
                         reagent_bar_y + 14.0,
@@ -2826,13 +3729,13 @@ async fn main() {
                         .filter(|c| c.is_uppercase())
                         .take(2)
                         .collect();
-                    draw_text(&abbr, sx + 4.0, reagent_bar_y + 16.0, 16.0, WHITE);
+                    ui.text(&abbr, sx + 4.0, reagent_bar_y + 16.0, 16.0, WHITE);
                     if point_in_rect((mouse_x, mouse_y), rect) {
                         hover_name = Some(r.name.clone());
                     }
                 }
                 let owned = player_inventory.get(id).copied().unwrap_or(0);
-                draw_text(
+                ui.text(
                     &format!("x{owned}"),
                     sx + 4.0,
                     reagent_bar_y + reagent_h + 4.0,
@@ -2842,15 +3745,25 @@ async fn main() {
             }
 
             if let Some(name) = hover_name {
-                let w = name.len() as f32 * 9.0 + 16.0;
+                ui.tooltip(&name, (mouse_x, mouse_y));
+            }
+            if let Some(t) = travel_fade {
                 draw_rectangle(
-                    mouse_x + 12.0,
-                    mouse_y - 28.0,
-                    w,
-                    24.0,
-                    Color::new(0.0, 0.0, 0.0, 0.85),
+                    0.0,
+                    0.0,
+                    screen_width(),
+                    screen_height(),
+                    Color::new(0.0, 0.0, 0.0, 1.0 - t / TRAVEL_FADE_SECS),
                 );
-                draw_text(&name, mouse_x + 20.0, mouse_y - 10.0, 18.0, WHITE);
+            }
+            if let Some((t, _, _)) = &sacrifice_fade {
+                draw_rectangle(
+                    0.0,
+                    0.0,
+                    screen_width(),
+                    screen_height(),
+                    Color::new(0.0, 0.0, 0.0, fade_alpha(*t)),
+                );
             }
             next_frame().await
         }

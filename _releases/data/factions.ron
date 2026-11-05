@@ -1,0 +1,38 @@
+// Per-faction reputation config. `tag_reactions` gives a signed multiplier
+// per reputation-linked tag. Reputation delta for a rite is:
+//
+//   delta = sum(tag_reactions[tag] * weight[tag] for tag in rite.tags)
+//
+// where `weight[tag]` is the count of selected reagents carrying that tag,
+// plus the hidden 0.5 disposal weight. There is no separate base unit;
+// these multipliers set the scale directly.
+//
+// `preserved` and `bound` are 0.0 for both factions on purpose. They have
+// gameplay effects instead of reputation effects (see README roadmap).
+// Theme tags (grief/love/guilt/hope) are absent: no faction reacts to them.
+
+
+[
+    (
+        id: "village",
+        name: "The Village",
+        starting_reputation: 0,
+        tag_reactions: {
+            "holy": 1.0,
+            "profane": -1.0,
+            "bound": 0.0,
+            "preserved": 0.0,
+        },
+    ),
+    (
+        id: "cult",
+        name: "The Cult",
+        starting_reputation: 0,
+        tag_reactions: {
+            "holy": -1.0,
+            "profane": 1.0,
+            "bound": 0.0,
+            "preserved": 0.0,
+        },
+    ),
+]

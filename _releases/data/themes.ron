@@ -1,0 +1,6 @@
+[
+    (id: "grief", village: "mournhollow", cult: "ashmourn", unlock: None),
+    (id: "love", village: "heartwarden", cult:"heartforge", unlock: None),
+    (id: "guilt", village: "penncross", cult: "guiltpyre", unlock: None),
+    (id: "hope", village: "hopewell", cult: "hopeforsworn", unlock: None),
+]

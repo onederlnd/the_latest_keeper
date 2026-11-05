@@ -1,0 +1,60 @@
+// story_beats.ron
+[
+    (
+        id: "village_awakening",
+        faction_id: "village",
+        threshold: 4.0,
+        direction: "above",
+        text: "Mother Elsbet: \"You're new to this. I know. Take your time.\"",
+    ),
+    (
+        id: "village_trust",
+        faction_id: "village",
+        threshold: 10.0,
+        direction: "above",
+        text: "Mother Elsbet: \"You've earned the village's trust. They speak of you kindly now.\"",
+    ),
+    (
+        id: "village_distrust",
+        faction_id: "village",
+        threshold: -10.0,
+        direction: "below",
+        text: "Mother Elsbet: \"The village grows wary of you. Tread carefully.\"",
+    ),
+    (
+        id: "village_devotion",
+        faction_id: "village",
+        threshold: 12.0,
+        direction: "above",
+        text: "Mother Elsbet: \"I've watched keepers come and go here longer than you'd believe. Something about you, though — I can't quite place it.\"",
+    ),
+
+    (
+        id: "cult_awakening",
+        faction_id: "cult",
+        threshold: 4.0,
+        direction: "above",
+        text: "The wind through the hollow feels different today, like something is listening.",
+    ),
+    (
+        id: "cult_favor",
+        faction_id: "cult",
+        threshold: 10.0,
+        direction: "above",
+        text: "A cold wind carries whispers: the cult has taken notice of you.",
+    ),
+    (
+        id: "cult_unease",
+        faction_id: "cult",
+        threshold: -10.0,
+        direction: "below",
+        text: "The offerings you've left go unclaimed. The cult is no longer sure of you.",
+    ),
+    (
+        id: "cult_devotion",
+        faction_id: "cult",
+        threshold: 12.0,
+        direction: "above",
+        text: "Something on the hill has started answering back, in a voice that almost sounds like your own.",
+    ),
+]

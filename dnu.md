@@ -1,3 +1,0 @@
-The Latest Keeper puts you in the boots of a gravedigger — the newest in an unbroken line of keepers stretching back further than history can say. You tend a graveyard caught between two factions who used to be one people: a village that believes every body deserves a burial, and a cult that believes the dead belong to something greater. Every burial you conduct shifts the balance between them — but that's just the surface.
-
-Something in the graveyard remembers more than you do — it's just waiting for you to catch up.

@@ -11,8 +11,8 @@
         name: "Mother Elsbet",
         id: "elsbet",
         position: (0.0, -150.0),
-        active_start: 0.25,
-        active_end: 0.85,
+        active_start: 0.0,
+        active_end: 1.0,
         faction_id: "village",
         sprite_id: "npc_elsbet",
         dialogue: [

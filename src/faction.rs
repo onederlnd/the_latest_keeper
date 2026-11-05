@@ -12,6 +12,15 @@ pub struct FactionDef {
     pub starting_reputation: f32,
 }
 
+impl FactionDef {
+    // Reputation change this faction would get from 'rite'. Pure: changes nothing.
+    pub fn delta_for(&self, rite: &Rite) -> f32 {
+        rite.tags
+            .iter()
+            .filter_map(|(tag, strength)| self.tag_reactions.get(tag).map(|r| r * strength))
+            .sum()
+    }
+}
 pub struct FactionState {
     pub reputation: HashMap<String, f32>,
 }
@@ -29,12 +38,7 @@ impl FactionState {
         let mut deltas = HashMap::new();
 
         for def in defs {
-            let mut delta = 0.0;
-            for (tag, strength) in &rite.tags {
-                if let Some(reaction) = def.tag_reactions.get(tag) {
-                    delta += reaction * strength;
-                }
-            }
+            let delta = def.delta_for(rite);
             if delta != 0.0 {
                 *self.reputation.entry(def.id.clone()).or_insert(0.0) += delta;
                 deltas.insert(def.id.clone(), delta);
@@ -109,5 +113,14 @@ mod tests {
         rite.tags.insert("preserved".to_string(), 2.0);
 
         assert!(state.apply_rite(&rite, &defs).is_empty());
+    }
+    #[test]
+    fn delta_for_matches_apply_rite() {
+        let defs = vec![village(), cult()];
+        let mut state = FactionState::from_defs(&defs);
+        let mut rite = Rite::default();
+        rite.tags.insert("holy".to_string(), 1.5);
+        let deltas = state.apply_rite(&rite, &defs);
+        assert_eq!(deltas["village"], defs[0].delta_for(&rite));
     }
 }

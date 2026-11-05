@@ -10,4 +10,8 @@ pub struct TendTask {
     #[serde(default)]
     pub stipend_amount: Option<f32>,
     pub flavor_text: String,
+    #[serde(default)]
+    pub restock_item: String,
+    #[serde(default)]
+    pub restock_amount: u32,
 }

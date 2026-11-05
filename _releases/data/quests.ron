@@ -1,0 +1,193 @@
+// quests.ron
+// Grief pair: Mournhollow (village) and Ashmourn (cult).
+// Kinds used: Fetch and Tag only (Timing needs a relative deadline).
+// An NPC shows its first quest in this file that isn't Done, so order
+// per NPC is the order here.
+// Tag quests complete when a rite's selected reagents carry the tag
+// (the hidden holy/profane disposal weight does not count).
+// Rep goes to the NPC's own faction. Rewards stay small: repeatable
+// quests are for filling time, not for moving the rep pace.
+// turn_in_text is spoken by the NPC when the quest is turned in.
+
+[
+    // ---------- Elsbet (hub) ----------
+    (
+        id: "elsbet_flowers",
+        npc_id: "elsbet",
+        kind: Fetch(item_id: "mourning_wreath", count: 2),
+        offer_text: "Could you bring me a pair of bell flowers? The chapel table looks bare without them.",
+        turn_in_text: "Bless you for these.",
+        reward_rep: 1.0,
+        reward_stipend: 3.0,
+        reward_item: None,
+        cooldown_days: 3,
+    ),
+    (
+        id: "elsbet_candles",
+        npc_id: "elsbet",
+        kind: Fetch(item_id: "candle", count: 2),
+        offer_text: "Could you spare two candles? The chapel never seems to have enough.",
+        turn_in_text: "Thank you. I'll see they're lit.",
+        reward_rep: 0.5,
+        reward_stipend: 4.0,
+        reward_item: None,
+        cooldown_days: 3,
+    ),
+
+    // ---------- Old Wren (hub, Mournhollow) ----------
+    (
+        id: "wren_candles",
+        npc_id: "wren",
+        kind: Fetch(item_id: "candle", count: 2),
+        offer_text: "I run short of candles by midwinter. Could you spare a couple?",
+        turn_in_text: "That'll see me through.",
+        reward_rep: 0.5,
+        reward_stipend: 4.0,
+        reward_item: None,
+        cooldown_days: 4,
+    ),
+    (
+        id: "wren_grief_rite",
+        npc_id: "wren",
+        kind: Tag(tag: "grief"),
+        offer_text: "Next time you lay someone down, put a bell flower in with the rest. Grief should be named at the end.",
+        turn_in_text: "Good. It was named.",
+        reward_rep: 1.0,
+        reward_stipend: 5.0,
+        reward_item: None,
+        cooldown_days: 5,
+    ),
+
+    // ---------- Tamsin (Mournhollow) ----------
+    (
+        id: "tamsin_wreath",
+        npc_id: "tamsin",
+        kind: Fetch(item_id: "mourning_wreath", count: 1),
+        offer_text: "Aunt Wren pretends she doesn't like the bell flowers. Could you bring me one? I'll leave it where she'll find it.",
+        turn_in_text: "She'll pretend she didn't notice. She will.",
+        reward_rep: 0.5,
+        reward_stipend: 3.0,
+        reward_item: Some(("salt", 2)),
+        cooldown_days: 3,
+    ),
+
+    // ---------- Odo (Mournhollow) ----------
+    (
+        id: "odo_nails",
+        npc_id: "odo",
+        kind: Fetch(item_id: "iron_nail", count: 3),
+        offer_text: "Coffin lids don't nail themselves. Spare me three?",
+        turn_in_text: "Good iron. Ta.",
+        reward_rep: 0.5,
+        reward_stipend: 4.0,
+        reward_item: Some(("grave_dirt", 2)),
+        cooldown_days: 3,
+    ),
+    (
+        id: "odo_holy_rite",
+        npc_id: "odo",
+        kind: Tag(tag: "holy"),
+        offer_text: "Bury one with a candle in it. Humor me.",
+        turn_in_text: "There. Lit the way down.",
+        reward_rep: 1.0,
+        reward_stipend: 5.0,
+        reward_item: None,
+        cooldown_days: 4,
+    ),
+
+    // ---------- Elder Maren (Mournhollow) ----------
+    (
+        id: "maren_preserved",
+        npc_id: "maren",
+        kind: Tag(tag: "preserved"),
+        offer_text: "Perform a rite with salt in it, so the Hall can say the dead were kept.",
+        turn_in_text: "The Hall will remember it.",
+        reward_rep: 1.0,
+        reward_stipend: 5.0,
+        reward_item: None,
+        cooldown_days: 5,
+    ),
+    (
+        id: "maren_candles",
+        npc_id: "maren",
+        kind: Fetch(item_id: "candle", count: 3),
+        offer_text: "The Hall keeps a light for every keeper. Three candles, if you can.",
+        turn_in_text: "Thank you. They'll burn well.",
+        reward_rep: 0.5,
+        reward_stipend: 6.0,
+        reward_item: None,
+        cooldown_days: 4,
+    ),
+
+    // ---------- Warden Dorn (hub, Ashmourn) ----------
+    (
+        id: "dorn_ash",
+        npc_id: "dorn",
+        kind: Fetch(item_id: "widows_ash", count: 2),
+        offer_text: "Bring me two ember-ash blooms. I'll scatter them from the north rise.",
+        turn_in_text: "They'll carry well on this wind.",
+        reward_rep: 1.0,
+        reward_stipend: 3.0,
+        reward_item: None,
+        cooldown_days: 3,
+    ),
+    (
+        id: "dorn_dirt",
+        npc_id: "dorn",
+        kind: Fetch(item_id: "grave_dirt", count: 2),
+        offer_text: "The old fires need something to bank them down. Two handfuls of grave dirt, if you have it.",
+        turn_in_text: "That'll bank them nicely.",
+        reward_rep: 0.5,
+        reward_stipend: 4.0,
+        reward_item: None,
+        cooldown_days: 4,
+    ),
+
+    // ---------- Isk the Pyretender (Ashmourn) ----------
+    (
+        id: "isk_burn_rite",
+        npc_id: "isk",
+        kind: Tag(tag: "profane"),
+        offer_text: "Burn one with grave dirt in the rite. The fire should have something to hold.",
+        turn_in_text: "It held. Good.",
+        reward_rep: 1.0,
+        reward_stipend: 5.0,
+        reward_item: None,
+        cooldown_days: 5,
+    ),
+    (
+        id: "isk_nails",
+        npc_id: "isk",
+        kind: Fetch(item_id: "iron_nail", count: 2),
+        offer_text: "Pyre frames hold with iron. Two nails would do.",
+        turn_in_text: "That'll hold the frame.",
+        reward_rep: 0.5,
+        reward_stipend: 4.0,
+        reward_item: None,
+        cooldown_days: 3,
+    ),
+
+    // ---------- Sister Veda (Ashmourn) ----------
+    (
+        id: "veda_grief_rite",
+        npc_id: "veda",
+        kind: Tag(tag: "grief"),
+        offer_text: "Burn something grieving. Put an ember-ash bloom in the rite and let it go.",
+        turn_in_text: "It's lighter now. You can tell.",
+        reward_rep: 1.0,
+        reward_stipend: 5.0,
+        reward_item: None,
+        cooldown_days: 5,
+    ),
+    (
+        id: "veda_salt",
+        npc_id: "veda",
+        kind: Fetch(item_id: "salt", count: 3),
+        offer_text: "Ash keeps better than salt, but we still run short. Three measures, if you can.",
+        turn_in_text: "Thank you. We'll make use of it.",
+        reward_rep: 0.5,
+        reward_stipend: 3.0,
+        reward_item: Some(("grave_dirt", 1)),
+        cooldown_days: 3,
+    ),
+]

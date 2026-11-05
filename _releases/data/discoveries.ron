@@ -1,0 +1,73 @@
+// discoveries.ron
+// One entry per village. `id` is a unique identifier for this Discovery
+// record (used e.g. for save-file tracking of which discoveries have
+// fired). `threshold` is a reputation value on `faction_id`
+// (Village or Cult reputation, not a per-village number) that must be
+// reached for `zone_id` to become visible/interactable. Both hemispheres
+// use identical thresholds, staggered by theme order, so neither faction's
+// path is easier than the other's.
+//
+// Order: Grief (8) -> Love (16) -> Guilt (24) -> Hope (32).
+// These are deliberately low right now for faster iteration/testing —
+// bump back up (e.g. toward the original 40/90/150/220) once pacing
+// needs to feel like a real playthrough again. Each village's Milestone
+// threshold (milestones.ron) must stay above its own Discovery threshold
+// here — see that file's header for current testing values.
+
+[
+    // --- Grief ---
+    (
+        id: "discover_mournhollow",
+        zone_id: "mournhollow",
+        faction_id: "village",
+        announce_text: "A path north opens through the mist. Mournhollow has noticed you.",
+    ),
+    (
+        id: "discover_ashmourn",
+        zone_id: "ashmourn",
+        faction_id: "cult",
+        announce_text: "Smoke rises on the southern road. Ashmourn has noticed you.",
+    ),
+
+    // --- Love ---
+    (
+        id: "discover_heartwarden",
+        zone_id: "heartwarden",
+        faction_id: "village",
+        announce_text: "Word reaches you of Heartwarden, where the Village keeps its dead close to the living.",
+    ),
+    (
+        id: "discover_heartforge",
+        zone_id: "heartforge",
+        faction_id: "cult",
+        announce_text: "Word reaches you of Heartforge, where the Cult turns what's loved into something lasting.",
+    ),
+
+    // --- Guilt ---
+    (
+        id: "discover_penncross",
+        zone_id: "penncross",
+        faction_id: "village",
+        announce_text: "You hear of Penncross, where the Village keeps a record of every wrong ever confessed.",
+    ),
+    (
+        id: "discover_guiltpyre",
+        zone_id: "guiltpyre",
+        faction_id: "cult",
+        announce_text: "You hear of Guiltpyre, where the Cult burns confessions rather than keep them.",
+    ),
+
+    // --- Hope ---
+    (
+        id: "discover_hopewell",
+        zone_id: "hopewell",
+        faction_id: "village",
+        announce_text: "You hear of Hopewell, where the Village plants for years it may not see.",
+    ),
+    (
+        id: "discover_hopeforsworn",
+        zone_id: "hopeforsworn",
+        faction_id: "cult",
+        announce_text: "You hear of Hopeforsworn, where the Cult stopped pretending the road leads anywhere.",
+    ),
+]

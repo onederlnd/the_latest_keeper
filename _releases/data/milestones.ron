@@ -1,0 +1,101 @@
+// milestones.ron
+// One entry per village. `threshold` is the reputation value on
+// `faction_id` that unlocks the Sacrifice ritual for `zone_id`'s theme
+// in the Cellar. `direction` is a quoted lowercase string ("above"), not
+// a bare enum variant and not "GreaterOrEqual" — matches what
+// Milestone's Deserialize impl actually expects. `threshold` is a float
+// (f32/f64), not an integer, to match the struct.
+//
+// Lowered for testing, mirrored across both factions, and each value is
+// now kept strictly above its matching village's Discovery threshold in
+// discoveries.ron (Mournhollow's earlier 80.0 outlier — lower than every
+// other village and inconsistent with its Ashmourn mirror — is fixed to
+// 15.0 to match):
+//
+//   Grief  (mournhollow/ashmourn)   discovery 8  -> milestone 15
+//   Love   (heartwarden/heartforge) discovery 16 -> milestone 25
+//   Guilt  (penncross/guiltpyre)    discovery 24 -> milestone 35
+//   Hope   (hopewell/hopeforsworn)  discovery 32 -> milestone 45
+//
+// Bump both files back up together (e.g. toward the earlier 40-220 /
+// 100-350 ranges) once pacing needs to feel like a real playthrough.
+
+// Tone note (see README_STORY.md "Design Intent Reminders"): announce
+// text and memory fragments stay quiet and matter-of-fact, never
+// triumphant or horror-inflected, and never explain more than the
+// keeper themself would know in the moment.
+
+[
+    (
+        id: "sacrifice_mournhollow",
+        zone_id: "mournhollow",
+        faction_id: "village",
+        threshold: 15.0,
+        direction: "above",
+        announce_text: "You could give your grief to Mournhollow. Let it be honored, not carried.",
+        memory_fragment: "I remember a grave I dug and never left. Someone taught me it was allowed to walk away.",
+    ),
+    (
+        id: "sacrifice_heartwarden",
+        zone_id: "heartwarden",
+        faction_id: "village",
+        threshold: 25.0,
+        direction: "above",
+        announce_text: "You could give your love to Heartwarden. Let it be kept, not clutched.",
+        memory_fragment: "I remember a hand I held. I don't remember the face. I remember not wanting to let go.",
+    ),
+    (
+        id: "sacrifice_penncross",
+        zone_id: "penncross",
+        faction_id: "village",
+        threshold: 35.0,
+        direction: "above",
+        announce_text: "You could give your guilt to Penncross. Let it be witnessed, not hidden.",
+        memory_fragment: "I remember something I should have done. I still don't remember what it was.",
+    ),
+    (
+        id: "sacrifice_hopewell",
+        zone_id: "hopewell",
+        faction_id: "village",
+        threshold: 45.0,
+        direction: "above",
+        announce_text: "You could give your hope to Hopewell. Let it be planted, not hoarded.",
+        memory_fragment: "I remember believing something would get better. I don't remember if it did.",
+    ),
+    (
+        id: "sacrifice_ashmourn",
+        zone_id: "ashmourn",
+        faction_id: "cult",
+        threshold: 15.0,
+        direction: "above",
+        announce_text: "You could give your grief to Ashmourn. Let it burn, not linger.",
+        memory_fragment: "I remember refusing to bury something. I remember it was lighter, after, to let it burn.",
+    ),
+    (
+        id: "sacrifice_heartforge",
+        zone_id: "heartforge",
+        faction_id: "cult",
+        threshold: 25.0,
+        direction: "above",
+        announce_text: "You could give your love to Heartforge. Let it be remade, not preserved.",
+        memory_fragment: "I remember loving something so much I destroyed it, so it could become something else.",
+    ),
+    (
+        id: "sacrifice_guiltpyre",
+        zone_id: "guiltpyre",
+        faction_id: "cult",
+        threshold: 35.0,
+        direction: "above",
+        announce_text: "You could give your guilt to Guiltpyre. Let it be released, not repaid.",
+        memory_fragment: "I remember deciding some debts can't be paid, only set down.",
+    ),
+    (
+        id: "sacrifice_hopeforsworn",
+        zone_id: "hopeforsworn",
+        faction_id: "cult",
+        threshold: 45.0,
+        direction: "above",
+        announce_text: "You could give your hope to Hopeforsworn. Let it be refused, not chased.",
+        memory_fragment: "I remember choosing not to hope for something, and finding a strange peace in the choosing.",
+    ),
+]

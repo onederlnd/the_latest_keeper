@@ -8,6 +8,7 @@
             "salt": 3,
             "candle": 3,
         },
+        // door: Some((Left, 80.0)),
     ),
     (
         id: "workyard",
@@ -18,6 +19,7 @@
             "grave_dirt": 2,
             "iron_nail": 2,
         },
+        // door: Some((Right, 150.0)),
     ),
     (
         id: "cellar",
@@ -25,6 +27,7 @@
         position: (150.0, 150.0),
         size: (180.0, 150.0),
         starting_stock:  {},
+        // door: Some((Left, 80.0)),
     ),
     (
         id: "keeper_shack",

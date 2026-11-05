@@ -1,0 +1,339 @@
+// npcs.ron
+// `id` must match `npc_id` in quests.ron. An NPC only opens the dialogue
+// window if at least one quest names its id.
+// Hub NPCs (no `map`) load into the hub; village NPCs set `map` to the
+// village id and use village-local coordinates.
+// Ashmourn sprites reuse existing placeholders until real art exists.
+
+[
+    // ---------- Hub ----------
+    (
+        name: "Mother Elsbet",
+        id: "elsbet",
+        position: (0.0, -150.0),
+        active_start: 0.25,
+        active_end: 0.85,
+        faction_id: "village",
+        sprite_id: "npc_elsbet",
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: -10.0,
+                lines: [
+                    "You've made enemies of good people. I don't say that to wound you - I say it because someone has to.",
+                    "I've watched keepers dig themselves into a hole like this before. Watched them climb back out, in time.",
+                ],
+            ),
+            (
+                min_rep: -10.0,
+                max_rep: -3.0,
+                lines: [
+                    "The Village is uneasy with you. Uneasy isn't the same as lost.",
+                ],
+            ),
+            (
+                min_rep: -3.0,
+                max_rep: 3.0,
+                lines: [
+                    "Good day to you. Mind how you tend to them - the dead remember longer than the living think.",
+                    "You're still finding your footing here. That's alright. Most do, at first.",
+                ],
+            ),
+            (
+                min_rep: 3.0,
+                max_rep: 10.0,
+                lines: [
+                    "The Village speaks well of you. It's a rare keeper who earns that so plainly.",
+                ],
+            ),
+            (
+                min_rep: 10.0,
+                max_rep: 9999.0,
+                lines: [
+                    "You remind me of someone, keeper. I can't always say who. Maybe I don't need to yet.",
+                    "There's a kindness in how you do this work. I knew it once, in someone else. It's good to see it again.",
+                ],
+            ),
+        ],
+    ),
+    (
+        name: "Old Wren",
+        id: "wren",
+        position: (350.0, -150.0),
+        active_start: 0.0,
+        active_end: 1.0,
+        faction_id: "village",
+        sprite_id: "npc_wren",
+        zone_id: Some("mournhollow"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: ["New to the grounds, are you? Mournhollow doesn't rush anyone."],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "Mournhollow doesn't ask you to stop grieving. Just to stop carrying it alone.",
+                    "Every marker here was someone's whole world, once.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "You've given something to this place. I felt it settle.",
+                    "Whatever you let go of here - it's held now. Not lost.",
+                ],
+            ),
+        ],
+    ),
+    (
+        name: "Warden Dorn",
+        id: "dorn",
+        position: (-360.0, -150.0),
+        active_start: 0.0,
+        active_end: 1.0,
+        faction_id: "cult",
+        sprite_id: "npc_wren",
+        zone_id: Some("ashmourn"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "New to the pyre? Ashmourn doesn't rush anyone either. The fire keeps its own time.",
+                    "Smoke carries further than words. That's rather the point of it.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "You've stopped flinching at the fire. That's most of the work.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "Whatever you burn here goes lighter than it came. Ask anyone who's tried carrying it instead.",
+                ],
+            ),
+        ],
+    ),
+
+    // ---------- Mournhollow ----------
+    (
+        name: "Sexton Halbrecht",
+        id: "halbrecht",
+        position: (-190.0, -90.0),
+        active_start: 0.0,
+        active_end: 1.0,
+        faction_id: "village",
+        sprite_id: "npc_halbrecht",
+        zone_id: Some("mournhollow"),
+        map: Some("mournhollow"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "I ring the bell for people I never met. Someone should.",
+                    "Mind the chapel step. It has opinions.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "The bell sounds better lately. Or I've stopped listening for what's wrong with it.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "I rang it for the last keeper too. Same hands, I think. Different coat.",
+                ],
+            ),
+        ],
+    ),
+    (
+        name: "Tamsin",
+        id: "tamsin",
+        position: (205.0, 65.0),
+        active_start: 0.3,
+        active_end: 0.8,
+        faction_id: "village",
+        sprite_id: "npc_tamsin",
+        zone_id: Some("mournhollow"),
+        map: Some("mournhollow"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "You're the keeper? My aunt Wren says you're new. She says that about everyone.",
+                    "If you see Aunt Wren up at the graveyard, tell her she left her kettle on. She always does.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "Aunt Wren talks about you now. Grudgingly, which is how she pays compliments.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "She's been humming again. She hasn't done that since before I was born.",
+                ],
+            ),
+        ],
+    ),
+    (
+        name: "Odo the Gravedigger",
+        id: "odo",
+        position: (-245.0, 270.0),
+        active_start: 0.1,
+        active_end: 0.6,
+        faction_id: "village",
+        sprite_id: "npc_odo",
+        zone_id: Some("mournhollow"),
+        map: Some("mournhollow"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "Six feet down, same as ever. The dead never complain about the depth.",
+                    "Heard you salt them first. Fussy. I respect it.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "Your rites are getting fancy. I dig the hole, you get the credit. Fair enough.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "I've dug for three keepers now. You're the first to ask my name twice.",
+                ],
+            ),
+        ],
+    ),
+    (
+        name: "Elder Maren",
+        id: "maren",
+        position: (290.0, -115.0),
+        active_start: 0.35,
+        active_end: 0.9,
+        faction_id: "village",
+        sprite_id: "npc_maren",
+        zone_id: Some("mournhollow"),
+        map: Some("mournhollow"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "Keepers come and go. The Hall remembers all of them, even when they don't.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "You stand where the last keeper stood. Same spot on the floor, worn smooth.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "When the time comes, don't grieve the choosing. Every keeper before you chose too.",
+                ],
+            ),
+        ],
+    ),
+
+    // ---------- Ashmourn ----------
+    (
+        name: "Isk the Pyretender",
+        id: "isk",
+        position: (-170.0, 120.0),
+        active_start: 0.0,
+        active_end: 1.0,
+        faction_id: "cult",
+        sprite_id: "npc_odo",
+        zone_id: Some("ashmourn"),
+        map: Some("ashmourn"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "Mind the pyre rail. It's warm. It's always warm.",
+                    "I feed it through the night. Someone should be awake for what's leaving.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "You tend the fire like you mean it. Not everyone does.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "You stay for the last of the embers. Most people leave when the flames do.",
+                ],
+            ),
+        ],
+    ),
+    (
+        name: "Sister Veda",
+        id: "veda",
+        position: (240.0, -80.0),
+        active_start: 0.3,
+        active_end: 0.8,
+        faction_id: "cult",
+        sprite_id: "npc_tamsin",
+        zone_id: Some("ashmourn"),
+        map: Some("ashmourn"),
+        dialogue: [
+            (
+                min_rep: -9999.0,
+                max_rep: 70.0,
+                lines: [
+                    "You're the keeper? We heard. Smoke carries news faster than the road does.",
+                    "Grief burns clean if you let it. It's the holding on that leaves a stain.",
+                ],
+            ),
+            (
+                min_rep: 70.0,
+                max_rep: 100.0,
+                lines: [
+                    "You carry less than when you came. I can tell by how you stand.",
+                ],
+            ),
+            (
+                min_rep: 100.0,
+                max_rep: 9999.0,
+                lines: [
+                    "Ashmourn feels lighter when you're here. I don't say that to flatter you. I don't flatter.",
+                ],
+            ),
+        ],
+    ),
+]

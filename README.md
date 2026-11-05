@@ -102,8 +102,7 @@ No ECS crate. Game state is plain structs and enums. No networking, no telemetry
 - **Hub map.** The graveyard: Morgue (autopsy), Workyard, Burial Site, Incinerator, Cellar (records and ritual), and Keeper's Shack (holds items carried through a sacrifice). Eight village markers ring it in two mirrored hemispheres.
 - **Village maps.** Each village is its own generated instance (own tilemap, zones, NPCs). Walk up to a discovered village marker and press `E` to enter, and walk into the "Path home" zone to return.
 - **Seeded generation.** Each village's layout comes from a stored seed, so a village looks the same every visit and after loading a save.
-- **Undiscovered villages** show as `???`. Once a village's theme has been picked, it also gives proximity hints as you walk near it.
-- **Terrain** is a tilemap (grass and path). The hub loads `data/tilemap.hub.ron` if present and otherwise generates a random-walk path toward each village. An in-game edit mode (`F2`) paints tiles and `F6` saves them.
+- **Undiscovered villages** show as `???`. Once a village's theme has been picked, it also gives proximity hints as you walk 
 - **NPCs** appear on a daily schedule and speak lines that reflect your faction reputation. Villages carry their own NPCs.
 - **Interactions are proximity-gated.** Autopsy only in the Morgue, digging and burial only at the Burial Site, lighting and burning only at the Incinerator, the Cellar window and ritual only in the Cellar, tending only inside a village. Zone checks use the player's position, so stand inside the zone box.
 
@@ -132,7 +131,7 @@ Full narrative lives in `README_STORY.md`. Mechanically:
 - **NPCs speak with continuity, not alarm.** Mother Elsbet has spoken to keepers before you and reacts to your standing, not to what you personally did.
 - **Story beats** fire once when a faction's reputation crosses a threshold.
 - **Sacrifice** is unlocked by a higher, village-specific milestone. Confirming it ends the tenure, moves the chosen carry-forward items (up to 5) to the Keeper's Shack, resets reputation and inventory, and starts the next keeper.
-- **`reconciled` rites** (planned): a rite combining a kept-side and burned-side reagent with the same theme tag (for example Mourning Bell Flower + Ember-Ash Bloom, both `grief`) is flagged `reconciled`. No faction reacts to it. It's reserved for story beats and epitaphs foreshadowing the reunification ending.
+- **`reconciled` rites** (flag computed, no consumer yet): a rite combining a kept-side and burned-side reagent with the same theme tag (for example Mourning Bell Flower + Ember-Ash Bloom, both `grief`) is flagged `reconciled`. No faction reacts to it. It's reserved for story beats and epitaphs foreshadowing the reunification ending.
 - **Full discovery** of all 8 villages logs a line but is not a win state yet. Since a village can only be discovered once its theme is picked, this can only fire after all four themes have been chosen.
 
 ### Future idea: attended rituals
@@ -242,7 +241,7 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 
 - Manual: `F5` saves to a single unversioned `save.ron`, `F9` loads it. Works from the hub or inside a village.
 - **Persisted:** stipend, faction reputation, day and time, player position, hub return position, inventory, stock for the hub and every visited village, current map, village seeds, fired beats, milestones and tutorial steps, memory fragments, keeper number and tenure start, Cellar records, discovered zones, last-tended map, pending sacrifice state, next corpse id, missed days this tenure, quest status, pair index, cult-life flag, chosen themes, last delivery day, last restock day.
-- **Not persisted:** current corpse, incinerator burn timer, event log. Loading mid-day leaves you with no corpse until the next day's delivery.
+- **Not persisted:** event log. The current corpse and incinerator burn timer are saved, so loading mid-day restores the corpse where you left it.
 - Loading rebuilds each village from its saved seed, then restores its stock.
 - Main menu (New Game / Continue / Quit) and pause menu (Esc: Resume / Save / Load / Quit to Menu / Quit Game). One save slot, no schema versioning yet.
 
@@ -252,8 +251,7 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 - **Inventory window** (`I`): carried reagents. Left-click adds one to the next rite, right-click removes one, up to 4 total. Each tile shows how many you carry and how many are selected.
 - **Cellar window** (`C`, inside the Cellar): past keepers and recovered memory fragments.
 - **Sacrifice window** (`R`, inside the Cellar once unlocked): left-click a row to add, right-click to remove, up to 5 items. `Enter` confirms.
-- **Theme picker:** appears whenever a new pair slot needs a theme, including at the start of a new game.
-- **Map window** (`M`): placeholder.
+- **Theme picker:** opens when no other window is open and `chosen_themes.len() == pair_index` (while `pair_index < 4`): at New Game and right after each Cult-life sacrifice. Lists unchosen themes; click one to pick. It can't be dismissed (Esc is ignored) and the `I`/`Q`/`M`/`C`/`R` hotkeys are ignored while it's open.placeholder.
 - **Bottom bar:** four tool slots and a row of reagent slots above them. Each reagent slot shows two initials, a carried count, and a gold number when selected; hover for the full name. Left-click adds, right-click removes. The Shovel (`2`) is functional and required for digging; Hoe, Spell A, and Spell B are placeholders.
 
 ## Controls
@@ -265,7 +263,7 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 | `F` | Corpse work. **Hold** in the Morgue to autopsy; **hold** at the Burial Site with the Shovel selected to dig; **press once** at the Incinerator to light the fire |
 | `1`-`4` | Select a tool slot (Shovel is `2`; the rest are placeholders) |
 | Left / right click reagent slot or Inventory tile | Add / remove one of that reagent for the next rite (max 4, repeats allowed) |
-| `Esc` | Close a window, or open and close the pause menu |
+| `Esc` | Close a window (not Dialogue or Theme Picker; Dialogue closes with `E`), or open and close the pause menu |
 | `I` | Inventory window |
 | `C` | Cellar window (inside the Cellar) |
 | `R` | Sacrifice window (inside the Cellar, once unlocked) |
@@ -274,7 +272,6 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 | `Space` | Perform the rite and dispose of the corpse (at the dug grave or the lit incinerator, with at least one reagent selected) |
 | `Enter` | Confirm the sacrifice |
 | `F5` / `F9` | Save / load |
-| `F2` / `F6` | Toggle map edit mode / save the current map's tiles |
 
 ## Roadmap
 
@@ -306,16 +303,18 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 
 ### **Next: reputation and pacing**
 
-- [ ] **Weighted-tag reputation:** finish moving `rite.rs` / `faction.rs` fully to weighted-tag resolution; add `reconciled` flag; populate `items.ron` (8 village reagents) and confirm `factions.ron` multipliers against the pacing table; set `progression.ron` to the 40/100 → 220/350 table; add stock-refresh amounts to `tending.ron`
+- [x] **Weighted-tag reputation:** `rite.rs` / `faction.rs` resolve weighted tags; `reconciled` flag is computed (no consumer yet, reserved for story beats/epitaphs); `items.ron` has all 12 reagents; `factions.ron` multipliers match the pacing table.
+- [ ] **Progression + tending data:** set `progression.ron` to 40/100 → 220/350; enforce `tending_stock_cap`; tie restock amounts to `items.ron`.
 - [x] **Neutralize `bound` in reputation:** set `bound` to 0.0 for both factions in `factions.ron` so the Village/Cult mirror is exact and the pacing table holds. `preserved` is already 0. Keep both tags on reagents.
 - [ ] **Give `preserved` and `bound` real effects (gameplay, not reputation):**
-  - `preserved`: each unit of weight slows the corpse's decay after the rite is chosen, or extends how long a corpse stays fresh before it rots.
-  - `bound`: each unit of weight raises the sacrifice carry-over, or adds one extra carry-forward slot to the 5-item limit.
+  - [x] `preserved`: each reagent whose only tag is `preserved` (Salt), selected at autopsy, is consumed and adds `0.25` to the corpse's `preserved_bonus`, slowing decay by `1 / (1 + bonus)`.
+  - [ ] `bound`: each unit of weight raises the sacrifice carry-over, or adds one extra carry-forward slot to the 5-item limit.
   - Both effects must not change rep/day. Test them against the section 3 table in `README_PACING.md` before locking numbers.
 - [ ] **Empty-rite handling:** allow a rite with no reagents (disposal weight only) or show a clearer message
 - [ ] **Theme-pair story beat:** write the player's theme choice into a story beat
-- [ ] **Save the current corpse and incinerator burn timer**
-- [ ] **Cleanup pass:** clear `burn_timer` and `last_tended` on sacrifice, remove unused `ActionKind::StokeIncinerator`, block movement and hotkeys while windows are open, let the theme picker be dismissed
+- [x] **Save the current corpse and incinerator burn timer**
+- [x] **Cleanup pass:** clear `burn_timer` and `last_tended` on sacrifice, remove unused `ActionKind::StokeIncinerator`, block movement and hotkeys while windows are open
+- [ ] **Theme picker dismissal:** decide whether it stays mandatory or can be closed and reopened (currently Esc is ignored)
 - [ ] **Variable body count:** mostly 1 per day, occasional 0 or 2
 - [ ] **NPC quests, content pass:** more quests per NPC, a quest log, quest markers
 - [ ] **Graveyard upkeep chores:** small recurring hub tasks (clear overgrowth, repair a marker) for minor stipend/rep
@@ -334,6 +333,11 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 
 ### **Story and endgame**
 
+- [ ] **Corpse stories:** each delivered corpse gets a short life-and-death story, revealed when the autopsy finishes (the corpse panel shows "Unexamined" until then).
+  - Built from parts in a new `data/corpses.ron`: occupation + cause of death + one detail. Each detail carries a tag that becomes the corpse's `requested_tag`, replacing the random pick, so the request has a reason ("she wanted to be burned").
+  - `Corpse` gets `#[serde(default)] story: Option<String>`; the story is set at delivery and logged in the `Autopsy` arm.
+  - Occasional hand-written stories tied to a village, theme, or keeper number serve as story beats.
+  - Later: carry the story into the Cellar record or epitaph when the rite matches.
 - [ ] Reunification end-state and win condition — confirmed: full 8-life run only, no early ending
 - [ ] Reflective closing story beat
 - [ ] Attended rituals and NPC pathing
@@ -345,7 +349,8 @@ See `README_PACING.md` for the full per-life table and the reasoning behind the 
 - **Carry-over:** 20% of the milestone just reached, applied to the next life's faction only. Confirm the percentage by playtest, and whether the other faction should get anything.
 - **Theme-pair selection UI:** the picker exists; how it should be presented (a Cellar prompt, a vision, a dialogue), and what story beat marks a completed pair, are still open.
 - **Quest system scope:** how many quests per NPC and which ones repeat (`cooldown_days` now resets completed quests; content doesn't use it yet). Keep `reward_rep` small on repeatable quests so they don't move the rep pace.
-- **`preserved` / `bound` effects:** reputation is now zero for both. Decide the exact effect sizes (decay slowdown, carry-over bonus), and whether either belongs in the rite UI as a visible preview.
+- Quest progress is saved. A quest log (`Q`) lists active quests and cooldowns, and NPCs show `!`/`?` markers. Quest content is still thin.
+- **`bound` effect and `preserved` tuning:** `preserved` is in (0.25 per reagent, consumed at autopsy, so Prayer Candle is spent early too). Decide whether `bound` raises carry-over or adds a carry slot, whether `preserved` should skip multi-tag reagents like the candle, and whether either belongs in the UI as a preview.
 
 ## Building and running
 

@@ -26,7 +26,10 @@ pub struct Corpse {
     pub decay_rate: f32,
     #[serde(skip)]
     pub pending_rite: Option<Rite>,
+    #[serde(default)]
     pub requested_tag: Option<String>,
+    #[serde(default)]
+    pub preserved_bonus: f32,
 }
 
 impl Corpse {
@@ -39,6 +42,7 @@ impl Corpse {
             decay_rate: 0.005,
             pending_rite: None,
             requested_tag: None,
+            preserved_bonus: 0.0,
         }
     }
 
@@ -61,7 +65,7 @@ impl Corpse {
 
     pub fn tick_decay(&mut self, dt: f32) {
         if !matches!(self.state, CorpseState::Buried | CorpseState::Burned) {
-            self.age_secs += dt;
+            self.age_secs += dt * (1.0 / (1.0 + self.preserved_bonus));
         }
     }
 
@@ -133,5 +137,12 @@ mod tests {
         let (_, method) = corpse.dispose();
         assert_eq!(corpse.state, CorpseState::Burned);
         assert_eq!(method, Disposal::Burning);
+    }
+    #[test]
+    fn preserved_slows_decay() {
+        let mut c = Corpse::new(1, 5.0);
+        c.preserved_bonus = 1.0;
+        c.tick_decay(100.0);
+        assert!((c.current_quality() - 4.75).abs() < 0.001);
     }
 }

@@ -1,9 +1,18 @@
 // src/world.rs
+
 use crate::npc::Npc;
 use crate::render;
-use crate::zone::{Zone, ZoneDef, ZoneRegistry};
-use macroquad::rand;
+use crate::village_layout::door_anchor;
+use crate::village_layout::{self, Layout, VillageProp};
+use crate::zone::DoorSide;
+use crate::zone::{Zone, ZoneDef, ZoneKind, ZoneRegistry};
+use macroquad::rand::{self, RandGenerator};
 use std::collections::HashMap;
+
+const STRUCTURES: &[(ZoneKind, &str, u32, (f32, f32))] = &[
+    (ZoneKind::Store, "Store", 1, (140.0, 100.0)),
+    (ZoneKind::Home, "Home", 5, (100.0, 80.0)),
+];
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum MapId {
@@ -17,17 +26,51 @@ pub struct VillageInstance {
     pub zones: ZoneRegistry,
     pub exit_zone: (f32, f32, f32, f32),
     pub seed: u64,
+    pub props: Vec<VillageProp>,
 }
-/// Placeholder generator — fill in real layout/content later.
+
+fn place_structures(
+    zones: &mut ZoneRegistry,
+    village: &str,
+    rng: &RandGenerator,
+    layout: &mut Layout,
+) {
+    for &(kind, label, count, (w, h)) in STRUCTURES {
+        for i in 0..count {
+            let pose = layout
+                .try_place(zones, rng, w, h)
+                .unwrap_or_else(|| panic!("could not place {label} {i} in {village}"));
+            let id = format!("{village}_{}_{i}", label.to_lowercase());
+            let mut zone = Zone::new(&id, label, pose.pos, (w, h), None, None);
+            zone.kind = kind;
+            zone.door = Some((pose.side, pose.off));
+            zones.register(zone);
+        }
+    }
+}
+fn sibling(id: &str) -> Option<&'static str> {
+    crate::THEMES.iter().find_map(|t| {
+        if t.1 == id {
+            Some(t.2)
+        } else if t.2 == id {
+            Some(t.1)
+        } else {
+            None
+        }
+    })
+}
+
+pub fn seed_for(id: &str, cache: &HashMap<String, VillageInstance>) -> u64 {
+    sibling(id)
+        .and_then(|s| cache.get(s))
+        .map(|i| i.seed)
+        .unwrap_or_else(|| rand::gen_range(0, u64::MAX))
+}
+
 pub fn generate_village(zone_id: &str, seed: u64) -> VillageInstance {
-    rand::srand(seed);
-    let width = 50;
-    let height = 60;
-    let tile_size = 32.0;
-    let origin = (
-        -(width as f32 * tile_size) / 2.0,
-        -(height as f32 * tile_size) / 2.0,
-    );
+    let rng = RandGenerator::new();
+    rng.srand(seed);
+    let mut layout = village_layout::build_roads(&rng);
 
     let mut zones = ZoneRegistry::new();
 
@@ -52,46 +95,66 @@ pub fn generate_village(zone_id: &str, seed: u64) -> VillageInstance {
             }
         };
 
-        zones.register(Zone::from_def(&ZoneDef {
+        let pose = layout
+            .try_place(&zones, &rng, 80.0, 60.0)
+            .expect("could not place grounds");
+        let mut grounds = Zone::from_def(&ZoneDef {
             id: grounds_id.to_string(),
             name,
-            position: (-40.0, 60.0),
+            position: pose.pos,
             size: (80.0, 60.0),
             starting_stock,
             faction_id: None,
             unlocks_from: None,
-        }));
+            kind: ZoneKind::Grounds,
+            door: None,
+        });
+        grounds.door = Some((pose.side, pose.off));
+        zones.register(grounds);
     }
 
-    let mut targets: Vec<(f32, f32)> = zones
-        .zones
-        .values()
-        .filter(|z| !z.id.ends_with("_grounds"))
-        .map(|z| (z.position.0 + z.size.0 / 2.0, z.position.1 + z.size.1 / 2.0))
-        .collect();
-    targets.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let path = format!("data/tilemap_{zone_id}.ron");
+    place_structures(&mut zones, zone_id, &rng, &mut layout);
+    let tilemap = layout.tilemap();
+    let props = layout.scatter_props(&zones, &rng);
 
-    let tilemap = if let Ok(data) = std::fs::read_to_string(&path) {
-        ron::from_str(&data).unwrap_or_else(|_| {
-            generate_tilemap(width, height, tile_size, origin, (0.0, 0.0), &targets)
-        })
-    } else {
-        generate_tilemap(width, height, tile_size, origin, (0.0, 0.0), &targets)
-    };
-
-    rand::srand(macroquad::miniquad::date::now() as u64);
-
-    VillageInstance {
+    let mut inst = VillageInstance {
         tilemap,
         npcs,
         zones,
         exit_zone: (-30.0, -30.0, 60.0, 60.0),
         seed,
+        props,
+    };
+    if is_cult(zone_id) {
+        flip_x(&mut inst);
     }
+    inst
 }
 
 pub fn generate_tilemap(
+    width: usize,
+    height: usize,
+    tile_size: f32,
+    origin: (f32, f32),
+    hub_world: (f32, f32),
+    targets_world: &[(f32, f32)],
+) -> render::TileMapDef {
+    // Public entry point (hub etc.): seed a local generator from the global one.
+    let rng = RandGenerator::new();
+    rng.srand(rand::gen_range(0u64, u64::MAX));
+    generate_tilemap_with(
+        &rng,
+        width,
+        height,
+        tile_size,
+        origin,
+        hub_world,
+        targets_world,
+    )
+}
+
+pub fn generate_tilemap_with(
+    rng: &RandGenerator,
     width: usize,
     height: usize,
     tile_size: f32,
@@ -112,7 +175,7 @@ pub fn generate_tilemap(
     let hub = to_grid(hub_world);
     for &target_world in targets_world {
         let target = to_grid(target_world);
-        carve_path(&mut grid, hub, target, width, height);
+        carve_path(&mut grid, hub, target, width, height, rng);
     }
 
     let rows: Vec<String> = grid.iter().map(|r| r.iter().collect()).collect();
@@ -126,6 +189,7 @@ pub fn generate_tilemap(
         origin,
         legend,
         rows,
+        solids: vec![],
     }
 }
 
@@ -135,6 +199,7 @@ fn carve_path(
     target: (isize, isize),
     width: usize,
     height: usize,
+    rng: &RandGenerator,
 ) {
     let mut current = start;
     let dx0 = target.0 - current.0;
@@ -173,13 +238,13 @@ fn carve_path(
             } else {
                 current.1 += dy.signum();
             }
-        } else if wander_choice > 0 && rand::gen_range(0, wander_choice) == 0 {
+        } else if wander_choice > 0 && rng.gen_range(0, wander_choice) == 0 {
             if primary_is_x {
-                current.1 += if rand::gen_range(0, 2) == 0 { 1 } else { -1 };
+                current.1 += if rng.gen_range(0, 2) == 0 { 1 } else { -1 };
             } else {
-                current.0 += if rand::gen_range(0, 2) == 0 { 1 } else { -1 };
+                current.0 += if rng.gen_range(0, 2) == 0 { 1 } else { -1 };
             }
-        } else if dx != 0 && (dy == 0 || rand::gen_range(0, 2) == 0) {
+        } else if dx != 0 && (dy == 0 || rng.gen_range(0, 2) == 0) {
             current.0 += dx.signum();
         } else if dy != 0 {
             current.1 += dy.signum();
@@ -188,6 +253,33 @@ fn carve_path(
         current.0 = current.0.clamp(0, width as isize - 1);
         current.1 = current.1.clamp(0, height as isize - 1);
         budget -= 1;
+    }
+}
+fn is_cult(zone_id: &str) -> bool {
+    crate::THEMES.iter().any(|t| t.2 == zone_id)
+}
+
+fn flip_x(inst: &mut VillageInstance) {
+    for z in inst.zones.zones.values_mut() {
+        z.position.0 = -(z.position.0 + z.size.0);
+        let w = z.size.0;
+        z.door = z.door.take().map(|(side, off)| match side {
+            DoorSide::Left => (DoorSide::Right, off),
+            DoorSide::Right => (DoorSide::Left, off),
+            DoorSide::Bottom => (DoorSide::Bottom, w - off),
+            DoorSide::Top => (DoorSide::Top, w - off),
+        });
+    }
+    for n in inst.npcs.iter_mut() {
+        n.position.0 = -n.position.0;
+    }
+    for row in inst.tilemap.rows.iter_mut() {
+        *row = row.chars().rev().collect();
+    }
+    let (x, y, w, h) = inst.exit_zone;
+    inst.exit_zone = (-(x + w), y, w, h);
+    for p in inst.props.iter_mut() {
+        p.pos.0 = -p.pos.0;
     }
 }
 
@@ -251,6 +343,95 @@ mod tests {
                 tasks.iter().any(|t| t.zone_id == grounds),
                 "no tend task for {grounds}"
             );
+        }
+    }
+    #[test]
+    fn village_stock_items_exist() {
+        let data = std::fs::read_to_string("data/items.ron").unwrap();
+        let reagents: Vec<crate::rite::Reagent> = ron::from_str(&data).unwrap();
+        for (_, _, item) in VILLAGE_STOCK {
+            assert!(reagents.iter().any(|r| r.id == *item), "missing {item}");
+        }
+    }
+    #[test]
+    fn tending_zones_match_village_stock() {
+        let data = std::fs::read_to_string("data/tending.ron").unwrap();
+        let tasks: Vec<crate::tending::TendTask> = ron::from_str(&data).unwrap();
+        for (_, grounds, item) in VILLAGE_STOCK {
+            let t = tasks
+                .iter()
+                .find(|t| t.zone_id == *grounds)
+                .unwrap_or_else(|| panic!("no tend task for {grounds}"));
+            assert_eq!(t.restock_item, *item, "{grounds} restocks the wrong item");
+        }
+    }
+    #[test]
+    fn every_village_has_paths() {
+        for (village, _, _) in VILLAGE_STOCK {
+            let v = generate_village(village, 1);
+            assert!(
+                v.tilemap.rows.iter().any(|r| r.contains('P')),
+                "{village} has no path"
+            );
+        }
+    }
+    #[test]
+    fn structures_do_not_overlap() {
+        for (village, _, _) in VILLAGE_STOCK {
+            for seed in 0..20 {
+                let v = generate_village(village, seed);
+                let zs: Vec<_> = v.zones.zones.values().collect();
+                for (i, a) in zs.iter().enumerate() {
+                    for b in &zs[i + 1..] {
+                        assert!(
+                            !a.overlaps(b.position.0, b.position.1, b.size.0, b.size.1, 0.0),
+                            "{village} seed {seed}: {} overlaps {}",
+                            a.id,
+                            b.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn cult_is_mirror_of_village() {
+        for (_, v, c) in crate::THEMES {
+            let a = generate_village(v, 7);
+            let b = generate_village(c, 7);
+            for za in a.zones.zones.values() {
+                let zb = &b.zones.zones[&za.id.replacen(v, c, 1)];
+                assert_eq!(zb.position.0, -(za.position.0 + za.size.0));
+                assert_eq!(zb.position.1, za.position.1);
+            }
+            let flipped: Vec<String> = a
+                .tilemap
+                .rows
+                .iter()
+                .map(|r| r.chars().rev().collect())
+                .collect();
+            assert_eq!(flipped, b.tilemap.rows);
+        }
+    }
+    #[test]
+    fn every_door_opens_onto_a_path() {
+        for (village, _, _) in VILLAGE_STOCK {
+            for seed in 0..20 {
+                let v = generate_village(village, seed);
+                let t = &v.tilemap;
+                for z in v.zones.zones.values() {
+                    if let Some((ax, ay)) = door_anchor(z) {
+                        let c = ((ax - t.origin.0) / t.tile_size).floor() as usize;
+                        let r = ((ay - t.origin.1) / t.tile_size).floor() as usize;
+                        assert_eq!(
+                            t.rows[r].chars().nth(c),
+                            Some('P'),
+                            "{village} seed {seed}: {} door not on a path",
+                            z.id
+                        );
+                    }
+                }
+            }
         }
     }
 }

@@ -2,22 +2,27 @@
     (
         id: "tut_welcome",
         trigger: "game_start",
-        text: "WASD to move, E to pick up reagents in front of you. The dead don't wait - the Village and the Cult are both watching, and neither agrees on what's right.",
+        text: "WASD to move. Press E to pick up reagents in the Morgue and Workyard. A body arrives each day - hold F in the Morgue to examine it. Mother Elsbet, north of the crossroads, has work for you.",
     ),
     (
         id: "tut_pickup",
         trigger: "first_pickup",
-        text: "Reagents shape the rite. Open your inventory with I, or click a slot in the bar below, to pick up to 4 for the next rite.",
+        text: "Reagents shape the rite. Press I (it stays open while you walk) or click the slots below to choose up to 4. Right-click removes one.",
     ),
     (
-        id: "tut_burial",
-        trigger: "first_burial",
-        text: "Every disposal shifts reputation - burial leans Village, burning leans Cult. There's no rite that pleases everyone.",
+        id: "tut_disposal_choice",
+        trigger: "first_disposal_choice",
+        text: "Dig a grave with the Shovel [2] and hold F at the Burial Site, or press F once at the Incinerator to light the fire. Burying and burning mean different things to each side.",
     ),
     (
-        id: "tut_cellar",
-        trigger: "first_cellar_visit",
-        text: "The Cellar remembers every keeper before you. Someday, it will remember you too.",
+        id: "tut_preserved",
+        trigger: "first_preserved",
+        text: "Salt selected at the autopsy is spent keeping the body fresh. Select it afterward and it joins the rite instead.",
+    ),
+    (
+        id: "tut_incinerator",
+        trigger: "first_incinerator",
+        text: "The fire needs time, and the body keeps decaying while it burns. Come back when the log says it's ready, then press SPACE.",
     ),
     (
         id: "tut_reagent_toggle",
@@ -25,18 +30,43 @@
         text: "Selected reagents are spent when you perform the rite. Press SPACE at a dug grave or lit fire to use them.",
     ),
     (
+        id: "tut_empty_rite",
+        trigger: "first_empty_rite",
+        text: "A bare rite pays nothing and moves reputation only a little. Press SPACE again to confirm, or select reagents first.",
+    ),
+    (
+        id: "tut_burial",
+        trigger: "first_burial",
+        text: "Every disposal shifts reputation - burial leans Village, burning leans Cult. There's no rite that pleases everyone.",
+    ),
+    (
         id: "tut_reputation_conflict",
         trigger: "first_reputation_conflict",
-        text: "That rite pleased one side and angered the other. Holy and profane pull in opposite directions.",
+        text: "Holy and profane pull in opposite directions, and mixing them cancels out. Choose a side, or aim for the middle.",
     ),
     (
         id: "tut_village_travel",
         trigger: "first_village_travel",
-        text: "Villages have their own people and reagents. Press T to tend the place once a day, and E to talk.",
+        text: "Villages have their own people and reagents. Press E to talk, and T to tend the place.",
     ),
     (
-        id: "tut_disposal_choice",
-        trigger: "first_disposal_choice",
-        text: "Dig a grave with the Shovel [2] + F, or light the incinerator with F. Burying and burning mean different things to each side.",
+        id: "tut_tend",
+        trigger: "first_tend",
+        text: "You can tend each place once per day. It nudges that village's faction toward you and refreshes its reagents.",
+    ),
+    (
+        id: "tut_quest",
+        trigger: "first_quest_offer",
+        text: "Press Enter or click to accept. Q opens your quest log. A ! marks someone with work for you, and a green ? means a quest is ready to turn in.",
+    ),
+    (
+        id: "tut_cellar",
+        trigger: "first_cellar_visit",
+        text: "The Cellar remembers every keeper before you. Someday, it will remember you too.",
+    ),
+    (
+        id: "tut_sacrifice",
+        trigger: "first_sacrifice_ready",
+        text: "The ritual calls. Stand in the Cellar and press R to choose what carries into your next life. Rites with bound reagents earn extra slots.",
     ),
 ]

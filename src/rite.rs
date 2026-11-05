@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub type Tag = String;
 
 pub const THEME_TAGS: [&str; 4] = ["grief", "love", "guilt", "hope"];
+pub const DISPOSAL_WEIGHT: f32 = 0.5;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Reagent {
@@ -19,6 +20,21 @@ pub struct Rite {
     pub tags: HashMap<Tag, f32>,
     pub base_quantity: f32,
     pub reconciled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Disposal {
+    Burial,
+    Burning,
+}
+impl Rite {
+    pub fn add_disposal(&mut self, disposal: Disposal) {
+        let tag = match disposal {
+            Disposal::Burial => "holy",
+            Disposal::Burning => "profane",
+        };
+        *self.tags.entry(tag.to_string()).or_insert(0.0) += DISPOSAL_WEIGHT;
+    }
 }
 
 pub fn resolve_rite(reagents: &[Reagent]) -> Rite {

@@ -21,7 +21,21 @@ pub struct Zone {
     pub size: (f32, f32),
     pub faction_id: Option<String>,
     pub unlocks_from: Option<String>,
+    #[serde(default)]
+    pub kind: ZoneKind,
+    #[serde(default)]
+    pub door: Option<(DoorSide, f32)>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ZoneKind {
+    #[default]
+    Station,
+    Grounds,
+    Home,
+    Store,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZoneDef {
     pub id: String,
@@ -33,6 +47,17 @@ pub struct ZoneDef {
     pub faction_id: Option<String>,
     #[serde(default)]
     pub unlocks_from: Option<String>,
+    #[serde(default)]
+    pub kind: ZoneKind,
+    #[serde(default)]
+    pub door: Option<(DoorSide, f32)>,
+}
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+pub enum DoorSide {
+    Top,
+    Bottom,
+    Left,
+    Right,
 }
 
 impl Zone {
@@ -45,6 +70,7 @@ impl Zone {
             def.faction_id.clone(),
             def.unlocks_from.clone(),
         );
+        zone.door = def.door;
         for (item_id, count) in &def.starting_stock {
             zone.deposit(item_id, *count);
         }
@@ -67,6 +93,8 @@ impl Zone {
             size,
             faction_id,
             unlocks_from,
+            kind: ZoneKind::default(),
+            door: None,
         }
     }
 
@@ -100,9 +128,15 @@ impl Zone {
         }
         taken
     }
-
     pub fn quantity_of(&self, item_id: &str) -> u32 {
         self.storage.get(item_id).map(|s| s.count).unwrap_or(0)
+    }
+
+    pub fn overlaps(&self, x: f32, y: f32, w: f32, h: f32, gap: f32) -> bool {
+        x < self.position.0 + self.size.0 + gap
+            && x + w + gap > self.position.0
+            && y < self.position.1 + self.size.1 + gap
+            && y + h + gap > self.position.1
     }
 }
 
@@ -160,5 +194,12 @@ mod tests {
         let taken = zone.withdraw("salt", 10);
         assert_eq!(taken, 2);
         assert_eq!(zone.quantity_of("salt"), 0);
+    }
+    #[test]
+    fn overlaps_respects_gap() {
+        let z = Zone::new("a", "A", (0.0, 0.0), (100.0, 100.0), None, None);
+        assert!(z.overlaps(50.0, 50.0, 10.0, 10.0, 0.0));
+        assert!(!z.overlaps(110.0, 0.0, 10.0, 10.0, 0.0));
+        assert!(z.overlaps(110.0, 0.0, 10.0, 10.0, 20.0));
     }
 }

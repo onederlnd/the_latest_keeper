@@ -1,0 +1,58 @@
+[
+    (
+        id: "hallowmere",
+        name: "Hallowmere",
+        faction_id: "village",
+        position: (-900.0, -400.0),
+        mirror_of: "hollowmere"
+    ),
+    (
+        id: "brightfen",
+        name: "Brightfen",
+        faction_id: "village",
+        position: (-950.0, -100.0),
+        mirror_of: "blightfen"
+    ),
+    (
+        id: "trueholt",
+        name: "Trueholt",
+        faction_id: "village",
+        position: (-900.0,  200.0),
+        mirror_of: "wraithholt"
+    ),
+    (
+        id: "kindwell",
+        name: "Kindwell",
+        faction_id: "village",
+        position: (-800.0,  500.0),
+        mirror_of: "coldwell"
+    ),
+
+    (
+        id: "hollowmere",
+        name: "Hollowmere",
+        faction_id: "cult",
+        position: (900.0, -400.0),
+        mirror_of: "hallowmere"
+    ),
+    (
+        id: "blightfen",
+        name: "Blightfen",
+        faction_id: "cult",
+        position: (950.0, -100.0),
+        mirror_of: "brightfen"
+    ),
+    (
+        id: "wraithholt",
+        name: "Wraithholt",
+        faction_id: "cult",
+        position: (900.0,  200.0),
+        mirror_of: "trueholt"
+    ),
+    (
+        id: "coldwell",
+        name: "Coldwell",
+        faction_id: "cult",
+        position: (800.0,  500.0),
+        mirror_of: "kindwell"),
+]
